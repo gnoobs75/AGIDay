@@ -1,0 +1,44 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; but it can also be manually edited.
+; Format:
+;   [section]
+;   key=value
+
+config_version=5
+
+[application]
+
+config/name="AGI Day: The Awakening"
+config/description="Top-down 3D RTS/bullet-hell hybrid built in Godot 4.5"
+config/version="0.1.0"
+run/main_scene=""
+config/features=PackedStringArray("4.5", "Forward Plus")
+config/icon="res://icon.svg"
+
+[autoload]
+
+ComponentRegistry="*res://core/ecs/component_registry_singleton.gd"
+EntityManager="*res://core/ecs/entity_manager_singleton.gd"
+ECS="*res://core/ecs/ecs_world.gd"
+SaveManager="*res://core/save/save_manager.gd"
+SnapshotManager="*res://core/save/snapshot_manager.gd"
+SnapshotSystem="*res://core/save/snapshot_system.gd"
+GameStateManager="*res://core/game/game_state_manager.gd"
+FactionManager="*res://core/factions/faction_manager.gd"
+UnitTemplateManager="*res://core/units/unit_template_manager.gd"
+ResourceManager="*res://core/resources/resource_manager.gd"
+
+[display]
+
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+window/size/mode=2
+
+[physics]
+
+common/physics_ticks_per_second=60
+
+[rendering]
+
+renderer/rendering_method="forward_plus"
