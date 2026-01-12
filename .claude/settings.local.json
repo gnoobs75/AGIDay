@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git init:*)",
+      "Bash(git remote add:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nInitial commit: Add MCP configuration\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git branch:*)",
+      "Bash(git push:*)",
+      "mcp__software-factory__list_work_orders",
+      "mcp__software-factory__get_next_work_order",
+      "mcp__software-factory__get_work_order",
+      "WebSearch",
+      "Skill(ralph-wiggum:ralph-loop)",
+      "Bash(\"C:\\\\Users\\\\charl\\\\.claude\\\\plugins\\\\cache\\\\claude-plugins-official\\\\ralph-wiggum\\\\dbc4a7733cd4/scripts/setup-ralph-loop.sh\" \"phase 1 work orders, max iterations 25, stop when last work item complete\")",
+      "mcp__software-factory__start_work_order",
+      "mcp__software-factory__complete_work_order",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nfeat: Implement Phase 2 core systems for AGI Day\n\nPhase 2 Work Orders \\(20 total\\):\n\nFaction Systems:\n- Core Faction Data Model with FactionConfig, FactionState, FactionManager\n- All 5 factions: Aether Swarm, LogiBots Colossus, Human Resistance,\n  OptiForge Legion, Dynapods Vanguard\n- Experience-based progression with faction-specific buffs\n\nUnit Systems:\n- Core Unit Entity extending ECS Entity\n- Unit Template System with factory pattern\n- Builder Units with faction-specific variants\n- Unit types for Aether Swarm, Tank Faction, Dynapods Vanguard\n\nResource/Research Systems:\n- REE Resource Data Model with transaction history\n- Resource Pool with dual REE/Power economy\n- Passive Income Generator with economic scaling\n- Technology and Research Progress tracking\n- Research Facility entities\n\nAI/Behavior Tree Systems:\n- Complete behavior tree framework \\(BTNode, BTSelector, BTSequence, etc.\\)\n- BehaviorTreeWrapper with seeded RNG for determinism\n- BehaviorTreeRegistry and Template system\n- AIComponent with priority-based target selection\n- Action nodes: find_target, move_to_target, patrol, attack, dodge, flee\n- Condition nodes: has_target, in_attack_range, health_critical, should_dodge\n- UnitBehaviorPatterns factory \\(standard, aggressive, defensive, support\\)\n- UnitBehaviorManager with object pooling for 5,000+ units\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nfeat: Implement Phase 3 core systems for AGI Day\n\nAdd complete backend systems for:\n- Wave Function Collapse city generation \\(WFC solver, tiles, zones\\)\n- District management with capture mechanics and control points\n- Factory production with continuous queues and overclocking\n- REE drop system with spatial queries and collection\n- Combat resolution engine with hybrid damage model\n- Victory condition monitoring with dual requirements\n- Voxel destruction stages \\(intact, cracked, rubble, crater\\)\n- Unit ownership state machine \\(hacking, mind control\\)\n\n20 work orders implemented across 63 files.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(if not exist \"c:\\\\Claude\\\\AGIDay\\\\core\\\\audio\" mkdir \"c:\\\\Claude\\\\AGIDay\\\\core\\\\audio\")"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "software-factory"
+  ]
+}
