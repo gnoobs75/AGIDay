@@ -58,11 +58,11 @@ func take_plant_damage(plant_id: int, damage: float) -> void:
 	if _power_system == null:
 		return
 
-	var plant := _power_system.power_api.grid_manager.get_plant(plant_id)
+	var plant: PowerPlant = _power_system.power_api.grid_manager.get_plant(plant_id)
 	if plant == null:
 		return
 
-	var was_operational := plant.is_operational()
+	var was_operational: bool = plant.is_operational()
 	plant.apply_damage(damage)
 
 	_log_event("plant_damaged", {
@@ -82,7 +82,7 @@ func on_power_plant_destroyed(plant_id: int) -> void:
 	if _power_system == null:
 		return
 
-	var plant := _power_system.power_api.grid_manager.get_plant(plant_id)
+	var plant: PowerPlant = _power_system.power_api.grid_manager.get_plant(plant_id)
 	if plant == null:
 		return
 
@@ -95,7 +95,7 @@ func on_power_plant_destroyed(plant_id: int) -> void:
 	# Get affected districts before network recalculation
 	var affected_districts: Array[int] = []
 	for line_id in plant.connected_line_ids:
-		var line := _power_system.power_api.grid_manager.get_line(line_id)
+		var line: PowerLine = _power_system.power_api.grid_manager.get_line(line_id)
 		if line != null:
 			affected_districts.append(line.target_district_id)
 
@@ -115,7 +115,7 @@ func on_power_plant_destroyed(plant_id: int) -> void:
 ## Check for cascading blackouts after destruction.
 func _check_cascading_blackouts(district_ids: Array[int]) -> void:
 	for district_id in district_ids:
-		var district := _power_system.power_api.grid_manager.get_district(district_id)
+		var district: DistrictPowerState = _power_system.power_api.grid_manager.get_district(district_id)
 		if district != null and district.is_blackout:
 			on_district_blackout(district_id)
 
@@ -129,11 +129,11 @@ func take_line_damage(line_id: int, damage: float) -> void:
 	if _power_system == null:
 		return
 
-	var line := _power_system.power_api.grid_manager.get_line(line_id)
+	var line: PowerLine = _power_system.power_api.grid_manager.get_line(line_id)
 	if line == null:
 		return
 
-	var was_active := line.is_active()
+	var was_active: bool = line.is_active()
 	line.apply_damage(damage)
 
 	if was_active and not line.is_active():
@@ -145,11 +145,11 @@ func on_power_line_destroyed(line_id: int) -> void:
 	if _power_system == null:
 		return
 
-	var line := _power_system.power_api.grid_manager.get_line(line_id)
+	var line: PowerLine = _power_system.power_api.grid_manager.get_line(line_id)
 	if line == null:
 		return
 
-	var district_id := line.target_district_id
+	var district_id: int = line.target_district_id
 
 	_log_event("line_destroyed", {
 		"line_id": line_id,
@@ -163,8 +163,8 @@ func on_power_line_destroyed(line_id: int) -> void:
 	_power_system.power_api.recalculate()
 
 	# Check for blackout
-	var district := _power_system.power_api.grid_manager.get_district(district_id)
-	if district != null and district.is_blackout:
+	var check_district: DistrictPowerState = _power_system.power_api.grid_manager.get_district(district_id)
+	if check_district != null and check_district.is_blackout:
 		on_district_blackout(district_id)
 
 
@@ -177,7 +177,7 @@ func on_district_blackout(district_id: int) -> void:
 	if _power_system == null:
 		return
 
-	var district := _power_system.power_api.grid_manager.get_district(district_id)
+	var district: DistrictPowerState = _power_system.power_api.grid_manager.get_district(district_id)
 	if district == null:
 		return
 
@@ -202,8 +202,8 @@ func on_district_power_restored(district_id: int) -> void:
 	if _power_system == null:
 		return
 
-	var district := _power_system.power_api.grid_manager.get_district(district_id)
-	if district == null:
+	var restored_district: DistrictPowerState = _power_system.power_api.grid_manager.get_district(district_id)
+	if restored_district == null:
 		return
 
 	_log_event("district_power_restored", {
@@ -218,7 +218,7 @@ func on_district_power_restored(district_id: int) -> void:
 	_resume_district_production(district_id)
 
 	# Emit restoration signal
-	district_power_restored.emit(district)
+	district_power_restored.emit(restored_district)
 
 
 # ============================================

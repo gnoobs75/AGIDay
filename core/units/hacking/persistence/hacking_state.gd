@@ -100,7 +100,7 @@ func to_bytes() -> PackedByteArray:
 	# Pack faction IDs (length-prefixed strings)
 	var factions := [original_faction, current_owner_faction, hacker_faction]
 	for faction in factions:
-		var faction_bytes := faction.to_utf8_buffer()
+		var faction_bytes: PackedByteArray = faction.to_utf8_buffer()
 		bytes.append(faction_bytes.size())  # 1 byte length (max 255)
 		bytes.append_array(faction_bytes)
 

@@ -150,9 +150,9 @@ func _test_deterministic_rng_distribution() -> void:
 		buckets[bucket] += 1
 
 	# Check distribution (each bucket should have ~1000 samples)
-	var min_bucket := buckets.min()
-	var max_bucket := buckets.max()
-	var good_distribution := min_bucket > 800 and max_bucket < 1200
+	var min_bucket: int = buckets.min()
+	var max_bucket: int = buckets.max()
+	var good_distribution: bool = min_bucket > 800 and max_bucket < 1200
 
 	_record_result("deterministic_rng_distribution",
 		good_distribution,
@@ -249,8 +249,8 @@ func _test_network_simulation_latency() -> void:
 	# In a real test, we'd use await or scene tree timers
 	# For this unit test, we check the queue exists
 
-	var stats := sim.get_stats()
-	var has_latency := stats["min_latency_ms"] == 100 and stats["max_latency_ms"] == 100
+	var stats: Dictionary = sim.get_stats()
+	var has_latency: bool = stats.get("min_latency_ms", 0) == 100 and stats.get("max_latency_ms", 0) == 100
 
 	_record_result("network_simulation_latency",
 		immediate.size() == 0 and has_latency,
@@ -268,11 +268,11 @@ func _test_network_simulation_packet_loss() -> void:
 	for i in 1000:
 		sim.queue_outgoing_rpc("rpc_test", [i], 1)
 
-	var stats := sim.get_stats()
-	var drop_rate := stats["actual_drop_rate"]
+	var stats: Dictionary = sim.get_stats()
+	var drop_rate: float = stats.get("actual_drop_rate", 0.0)
 
 	# Should be approximately 50% (40-60% acceptable)
-	var reasonable_drop := drop_rate > 0.4 and drop_rate < 0.6
+	var reasonable_drop: bool = drop_rate > 0.4 and drop_rate < 0.6
 
 	_record_result("network_simulation_packet_loss",
 		reasonable_drop,

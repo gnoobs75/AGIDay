@@ -49,7 +49,7 @@ func initialize(network_manager: NetworkManager) -> void:
 	_network_manager = network_manager
 
 	if _network_manager != null:
-		_is_connected = _network_manager.is_connected()
+		_is_connected = _network_manager.is_network_connected()
 		_network_manager.peer_connected.connect(_on_peer_connected)
 		_network_manager.peer_disconnected.connect(_on_peer_disconnected)
 		_network_manager.server_disconnected.connect(_on_server_disconnected)

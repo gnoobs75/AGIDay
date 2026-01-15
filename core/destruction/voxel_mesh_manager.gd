@@ -152,7 +152,7 @@ func _create_chunk_mesh(chunk_id: int) -> void:
 func queue_mesh_update(chunk_id: int, priority: int = PRIORITY_MEDIUM) -> void:
 	# Remove from other priority queues
 	for p in _update_queue:
-		var idx := _update_queue[p].find(chunk_id)
+		var idx: int = _update_queue[p].find(chunk_id)
 		if idx >= 0:
 			_update_queue[p].remove_at(idx)
 

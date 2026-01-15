@@ -26,7 +26,7 @@ var version: int = 0
 var is_dirty: bool = false
 
 ## Voxel storage (flat array, accessed via local coordinates)
-var _voxels: Array[VoxelState] = []
+var _voxels: Array[VoxelStateData] = []
 
 ## Quick lookup for damaged voxels
 var _damaged_voxels: Dictionary = {}  ## local_key -> true
@@ -73,23 +73,23 @@ func _initialize_storage() -> void:
 			0,
 			world_offset.z + local_z
 		)
-		_voxels[i] = VoxelState.new(world_pos, 100)
+		_voxels[i] = VoxelStateData.new(world_pos, 100)
 
 
 ## Get voxel at local coordinates.
-func get_voxel(local_x: int, local_z: int) -> VoxelState:
+func get_voxel(local_x: int, local_z: int) -> VoxelStateData:
 	if not _is_valid_local(local_x, local_z):
 		return null
 	return _voxels[_get_index(local_x, local_z)]
 
 
 ## Get voxel at local position vector.
-func get_voxel_v(local_pos: Vector2i) -> VoxelState:
+func get_voxel_v(local_pos: Vector2i) -> VoxelStateData:
 	return get_voxel(local_pos.x, local_pos.y)
 
 
 ## Set voxel at local coordinates.
-func set_voxel(local_x: int, local_z: int, voxel: VoxelState) -> void:
+func set_voxel(local_x: int, local_z: int, voxel: VoxelStateData) -> void:
 	if not _is_valid_local(local_x, local_z):
 		return
 	var idx := _get_index(local_x, local_z)
@@ -132,7 +132,7 @@ func repair_voxel(local_x: int, local_z: int, heal: int, current_time: float = 0
 
 
 ## Handle voxel stage change.
-func _handle_stage_change(local_x: int, local_z: int, voxel: VoxelState, old_stage: int, new_stage: int) -> void:
+func _handle_stage_change(local_x: int, local_z: int, voxel: VoxelStateData, old_stage: int, new_stage: int) -> void:
 	var key := _get_local_key(local_x, local_z)
 	var local_pos := Vector3i(local_x, 0, local_z)
 
@@ -189,8 +189,8 @@ func contains_world_position(world_pos: Vector3i) -> bool:
 
 
 ## Get all damaged voxels in chunk.
-func get_damaged_voxels() -> Array[VoxelState]:
-	var result: Array[VoxelState] = []
+func get_damaged_voxels() -> Array[VoxelStateData]:
+	var result: Array[VoxelStateData] = []
 	for key in _damaged_voxels:
 		var idx := int(key)
 		if idx >= 0 and idx < _voxels.size():
@@ -199,8 +199,8 @@ func get_damaged_voxels() -> Array[VoxelState]:
 
 
 ## Get all power nodes in chunk.
-func get_power_nodes() -> Array[VoxelState]:
-	var result: Array[VoxelState] = []
+func get_power_nodes() -> Array[VoxelStateData]:
+	var result: Array[VoxelStateData] = []
 	for key in _power_nodes:
 		var idx := int(key)
 		if idx >= 0 and idx < _voxels.size():
@@ -212,7 +212,7 @@ func get_power_nodes() -> Array[VoxelState]:
 func register_power_node(local_x: int, local_z: int) -> void:
 	var voxel := get_voxel(local_x, local_z)
 	if voxel != null:
-		voxel.set_flag(VoxelState.FLAG_POWER_NODE, true)
+		voxel.set_flag(VoxelStateData.FLAG_POWER_NODE, true)
 		_power_nodes[_get_index(local_x, local_z)] = true
 		_mark_dirty()
 

@@ -58,7 +58,7 @@ func process_damage(
 		return false
 
 	# Only original faction can unhack
-	var original := info.get("original_faction", "")
+	var original: String = info.get("original_faction", "")
 	if attacker_faction != original:
 		return false
 

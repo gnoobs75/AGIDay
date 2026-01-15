@@ -162,7 +162,7 @@ func process(delta: float) -> Dictionary:
 		var available_power := _get_faction_power(factory.faction_id)
 
 		# Process factory
-		var factory_result := factory.process(delta, available_ree, available_power)
+		var factory_result: Dictionary = factory.process(delta, available_ree, available_power)
 
 		# Consume resources
 		if factory_result["ree_consumed"] > 0:
@@ -318,7 +318,7 @@ func get_summary() -> Dictionary:
 
 	for factory in factories.values():
 		if not factory.is_destroyed:
-			var type_name := factory.get_type_name()
+			var type_name: String = factory.get_type_name()
 			type_counts[type_name] = type_counts.get(type_name, 0) + 1
 			total_queue += factory.production_queue.get_queue_size()
 

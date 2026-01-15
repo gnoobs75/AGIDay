@@ -58,7 +58,7 @@ func initialize(network_manager: NetworkManager, deterministic_rng: Deterministi
 
 ## Update synchronization (call each frame).
 func update(delta: float) -> void:
-	if _network_manager == null or not _network_manager.is_connected():
+	if _network_manager == null or not _network_manager.is_network_connected():
 		return
 
 	_last_state_sync += delta

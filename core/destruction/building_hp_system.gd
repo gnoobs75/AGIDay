@@ -141,8 +141,8 @@ func apply_damage(
 		return
 
 	# Apply damage multiplier
-	var multiplier := DAMAGE_MULTIPLIERS.get(damage_type, 1.0)
-	var effective_damage := damage * multiplier
+	var multiplier: float = DAMAGE_MULTIPLIERS.get(damage_type, 1.0)
+	var effective_damage: float = damage * multiplier
 
 	var old_hp := building.current_health
 	building.current_health = maxf(0.0, building.current_health - effective_damage)
@@ -200,7 +200,7 @@ func _handle_stage_transition(building_id: int, building: BuildingData, new_stag
 
 	# Request visual effects
 	if STAGE_EFFECTS.has(new_stage):
-		var effect := STAGE_EFFECTS[new_stage]
+		var effect: Dictionary = STAGE_EFFECTS[new_stage]
 		effects_requested.emit(building.position, effect["type"], effect["particles"])
 
 	# Update voxels if connected
@@ -237,14 +237,14 @@ func _update_building_voxels(building: BuildingData, stage: int) -> void:
 		var voxel = _voxel_system.get_voxel(vpos)
 		if voxel != null and voxel.stage < voxel_stage:
 			# Calculate damage needed to reach stage
-			var target_hp := 0
+			var target_hp: int = 0
 			match voxel_stage:
 				VoxelStage.Stage.INTACT: target_hp = 100
 				VoxelStage.Stage.CRACKED: target_hp = 49
 				VoxelStage.Stage.RUBBLE: target_hp = 9
 				VoxelStage.Stage.CRATER: target_hp = 0
 
-			var damage_needed := voxel.current_hp - target_hp
+			var damage_needed: int = voxel.current_hp - target_hp
 			if damage_needed > 0:
 				_voxel_system.damage_voxel(vpos, damage_needed)
 

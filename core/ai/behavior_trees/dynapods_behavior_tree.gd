@@ -173,7 +173,7 @@ func _check_obstacle_ahead(context: Dictionary) -> bool:
 		return false
 
 	# Check for vaultable obstacles in front
-	var obstacle := context.get("current_obstacle", null)
+	var obstacle: Variant = context.get("current_obstacle", null)
 	if obstacle != null:
 		return _can_vault.call(unit_id, obstacle)
 
@@ -270,7 +270,7 @@ func _action_momentum_charge(context: Dictionary) -> int:
 ## Action: Vault obstacle.
 func _action_vault_obstacle(context: Dictionary) -> int:
 	var unit_id: int = context["unit_id"]
-	var obstacle := context.get("current_obstacle", null)
+	var obstacle: Variant = context.get("current_obstacle", null)
 
 	if obstacle == null:
 		return Status.FAILURE

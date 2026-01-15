@@ -244,7 +244,7 @@ static func calculate_unit_value(unit_type: String, salvage_rate: float = 0.5) -
 
 ## Get statistics.
 func get_statistics() -> Dictionary:
-	var total := stats["destruction_total"] + stats["salvage_total"] + stats["district_income_total"]
+	var total: float = stats["destruction_total"] + stats["salvage_total"] + stats["district_income_total"]
 	return {
 		"total_generated": total,
 		"destruction": stats["destruction_total"],

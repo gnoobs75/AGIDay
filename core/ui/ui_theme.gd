@@ -167,13 +167,13 @@ func _create_button_styles(theme: Theme, accent_color: Color) -> void:
 func _create_faction_themes() -> void:
 	for faction_id in FACTION_COLORS:
 		var faction_theme := _base_theme.duplicate()
-		var accent := FACTION_COLORS[faction_id]
+		var accent: Color = FACTION_COLORS[faction_id]
 
 		# Update button styles with faction accent
 		_create_button_styles(faction_theme, accent)
 
 		# Update panel border to faction color
-		var panel_style := faction_theme.get_stylebox("panel", "Panel").duplicate()
+		var panel_style: StyleBox = faction_theme.get_stylebox("panel", "Panel").duplicate()
 		if panel_style is StyleBoxFlat:
 			panel_style.border_color = accent.darkened(0.5)
 		faction_theme.set_stylebox("panel", "Panel", panel_style)

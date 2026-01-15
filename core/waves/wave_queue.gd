@@ -69,7 +69,7 @@ func dequeue() -> WaveConfiguration:
 	if _queue.is_empty():
 		return null
 
-	var config := _queue.pop_front()
+	var config: WaveConfiguration = _queue.pop_front()
 	current_wave = config.wave_number
 
 	# Maintain queue size

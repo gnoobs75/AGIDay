@@ -186,7 +186,7 @@ func pick_random(array: Array) -> Variant:
 func shuffle(array: Array) -> void:
 	for i in range(array.size() - 1, 0, -1):
 		var j := randi_range(0, i)
-		var temp := array[i]
+		var temp: Variant = array[i]
 		array[i] = array[j]
 		array[j] = temp
 

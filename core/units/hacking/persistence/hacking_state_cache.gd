@@ -131,7 +131,7 @@ func clear() -> void:
 
 ## Get statistics.
 func get_stats() -> Dictionary:
-	var total := _stats["hits"] + _stats["misses"]
+	var total: int = _stats["hits"] + _stats["misses"]
 	var hit_rate := float(_stats["hits"]) / float(total) if total > 0 else 0.0
 
 	return {

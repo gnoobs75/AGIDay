@@ -76,16 +76,16 @@ func remove_template(template_id: String) -> bool:
 	# Remove from faction index
 	var faction_id := template.faction_id
 	if _faction_templates.has(faction_id):
-		var idx := _faction_templates[faction_id].find(template_id)
+		var idx: int = _faction_templates[faction_id].find(template_id)
 		if idx >= 0:
 			_faction_templates[faction_id].remove_at(idx)
 
 	# Remove from unit type index
 	var unit_type := template.unit_type
 	if _unit_type_templates.has(unit_type):
-		var idx := _unit_type_templates[unit_type].find(template_id)
-		if idx >= 0:
-			_unit_type_templates[unit_type].remove_at(idx)
+		var unit_type_idx: int = _unit_type_templates[unit_type].find(template_id)
+		if unit_type_idx >= 0:
+			_unit_type_templates[unit_type].remove_at(unit_type_idx)
 
 	_templates.erase(template_id)
 	template_removed.emit(template_id)

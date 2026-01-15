@@ -58,7 +58,7 @@ func add_unit(unit_id: int, position: Vector3, faction_id: String) -> void:
 		return
 
 	var minimap_pos := _world_to_minimap(position)
-	var color := UITheme.FACTION_COLORS.get(faction_id, Color.GRAY)
+	var color: Color = UITheme.FACTION_COLORS.get(faction_id, Color.GRAY)
 
 	# Create unit dot
 	var node := ColorRect.new()
@@ -109,7 +109,7 @@ func add_building(building_id: int, position: Vector3, faction_id: String, size:
 		return
 
 	var minimap_pos := _world_to_minimap(position)
-	var color := UITheme.FACTION_COLORS.get(faction_id, Color.GRAY)
+	var color: Color = UITheme.FACTION_COLORS.get(faction_id, Color.GRAY)
 	var building_size := BUILDING_SIZE * size
 
 	# Create building square
@@ -154,7 +154,7 @@ func update_district(district_id: int, bounds: Rect2, faction_id: String) -> voi
 		if old_node != null and is_instance_valid(old_node):
 			old_node.queue_free()
 
-	var color := UITheme.FACTION_COLORS.get(faction_id, Color.GRAY)
+	var color: Color = UITheme.FACTION_COLORS.get(faction_id, Color.GRAY)
 
 	# Convert bounds to minimap coords
 	var minimap_pos := _world_to_minimap(Vector3(bounds.position.x, 0, bounds.position.y))

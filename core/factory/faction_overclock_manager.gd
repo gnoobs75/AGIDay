@@ -63,7 +63,7 @@ func get_factory_profile(factory_id: int) -> FactionOverclockProfile:
 
 ## Calculate effective heat generation for factory.
 func get_effective_heat_generation(factory_id: int, base_rate: float) -> float:
-	var profile := _factory_profiles.get(factory_id)
+	var profile: FactionOverclockProfile = _factory_profiles.get(factory_id)
 	if profile != null:
 		return profile.get_effective_heat_generation(base_rate)
 	return base_rate
@@ -71,7 +71,7 @@ func get_effective_heat_generation(factory_id: int, base_rate: float) -> float:
 
 ## Calculate effective heat dissipation for factory.
 func get_effective_heat_dissipation(factory_id: int, base_rate: float) -> float:
-	var profile := _factory_profiles.get(factory_id)
+	var profile: FactionOverclockProfile = _factory_profiles.get(factory_id)
 	if profile != null:
 		return profile.get_effective_heat_dissipation(base_rate)
 	return base_rate
@@ -79,7 +79,7 @@ func get_effective_heat_dissipation(factory_id: int, base_rate: float) -> float:
 
 ## Get effective meltdown duration for factory.
 func get_meltdown_duration(factory_id: int) -> float:
-	var profile := _factory_profiles.get(factory_id)
+	var profile: FactionOverclockProfile = _factory_profiles.get(factory_id)
 	if profile != null:
 		return profile.meltdown_duration
 	return 30.0
@@ -87,7 +87,7 @@ func get_meltdown_duration(factory_id: int) -> float:
 
 ## Get max overclock level for factory.
 func get_max_overclock(factory_id: int) -> float:
-	var profile := _factory_profiles.get(factory_id)
+	var profile: FactionOverclockProfile = _factory_profiles.get(factory_id)
 	if profile != null:
 		return profile.max_overclock_level
 	return 2.0
@@ -95,7 +95,7 @@ func get_max_overclock(factory_id: int) -> float:
 
 ## Get effective production multiplier for factory.
 func get_production_multiplier(factory_id: int, overclock_level: float) -> float:
-	var profile := _factory_profiles.get(factory_id)
+	var profile: FactionOverclockProfile = _factory_profiles.get(factory_id)
 	if profile != null:
 		return profile.get_effective_production_multiplier(overclock_level)
 	return overclock_level
@@ -103,7 +103,7 @@ func get_production_multiplier(factory_id: int, overclock_level: float) -> float
 
 ## Validate overclock level for factory.
 func validate_overclock(factory_id: int, level: float) -> float:
-	var profile := _factory_profiles.get(factory_id)
+	var profile: FactionOverclockProfile = _factory_profiles.get(factory_id)
 	if profile != null:
 		return profile.validate_overclock_level(level)
 	return clampf(level, 1.0, 2.0)

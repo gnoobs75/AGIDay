@@ -164,7 +164,7 @@ func split(split_position: Vector3, new_squad_id: int) -> Squad:
 
 	for unit_id in _unit_ids:
 		if behavior.has_unit(unit_id):
-			var pos := behavior._unit_positions.get(unit_id, Vector3.ZERO)
+			var pos: Vector3 = behavior._unit_positions.get(unit_id, Vector3.ZERO)
 			if pos.distance_to(split_position) > PROXIMITY_THRESHOLD / 2.0:
 				to_move.append(unit_id)
 

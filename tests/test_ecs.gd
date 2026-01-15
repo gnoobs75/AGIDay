@@ -686,13 +686,13 @@ func _test_deterministic_entity_ids() -> void:
 	for i in range(5):
 		ids2.append(em2.create_entity("Unit").id)
 
-	var match := true
+	var ids_match := true
 	for i in range(5):
 		if ids1[i] != ids2[i]:
-			match = false
+			ids_match = false
 			break
 
-	_assert(match, "Same seed produces identical entity IDs")
+	_assert(ids_match, "Same seed produces identical entity IDs")
 
 
 func _test_deterministic_queries() -> void:

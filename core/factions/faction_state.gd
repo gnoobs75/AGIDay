@@ -115,8 +115,8 @@ func get_level_progress(pool_name: String) -> float:
 
 ## Check and process level up
 func _check_level_up(pool_name: String) -> void:
-	var current_xp := experience_pools.get(pool_name, 0.0)
-	var current_level := experience_levels.get(pool_name, 1)
+	var current_xp: float = experience_pools.get(pool_name, 0.0)
+	var current_level: int = experience_levels.get(pool_name, 1)
 	var xp_for_next := get_xp_for_level(current_level + 1)
 
 	while current_xp >= xp_for_next:

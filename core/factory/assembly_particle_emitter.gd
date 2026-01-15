@@ -350,11 +350,15 @@ func get_type() -> String:
 func reset() -> void:
 	stop()
 	if _particles != null:
-		_particles.amount = match _particle_type:
-			TYPE_WELDING: WELDING_PARTICLES
-			TYPE_SPARKS: SPARK_PARTICLES
-			TYPE_ENERGY: ENERGY_PARTICLES
-			_: WELDING_PARTICLES
+		var amount: int = WELDING_PARTICLES
+		match _particle_type:
+			TYPE_WELDING:
+				amount = WELDING_PARTICLES
+			TYPE_SPARKS:
+				amount = SPARK_PARTICLES
+			TYPE_ENERGY:
+				amount = ENERGY_PARTICLES
+		_particles.amount = amount
 
 
 ## Cleanup.

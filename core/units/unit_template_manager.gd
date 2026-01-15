@@ -172,6 +172,11 @@ func _load_default_templates() -> int:
 	defaults.append(_create_optiforge_siege_cannon_template())
 	defaults.append(_create_optiforge_shockwave_generator_template())
 	defaults.append(_create_optiforge_shield_generator_template())
+	defaults.append(_create_optiforge_blitzkin_template())
+	defaults.append(_create_optiforge_pulseforged_template())
+	defaults.append(_create_optiforge_jetkin_template())
+	defaults.append(_create_optiforge_hullbreaker_template())
+	defaults.append(_create_optiforge_eyeforge_template())
 
 	# Dynapods Vanguard units
 	defaults.append(_create_dynapods_legbreaker_template())
@@ -182,10 +187,19 @@ func _load_default_templates() -> int:
 	# LogiBots Colossus units
 	defaults.append(_create_logibots_bulkripper_template())
 	defaults.append(_create_logibots_haulforge_template())
+	defaults.append(_create_logibots_crushkin_template())
+	defaults.append(_create_logibots_siegehaul_template())
+	defaults.append(_create_logibots_titanclad_template())
+	defaults.append(_create_logibots_gridbreaker_template())
 
 	# Human Resistance units
 	defaults.append(_create_human_soldier_template())
 	defaults.append(_create_human_sniper_template())
+	defaults.append(_create_human_m4_fireteam_template())
+	defaults.append(_create_human_javelin_ghost_template())
+	defaults.append(_create_human_m1_abrams_template())
+	defaults.append(_create_human_stryker_template())
+	defaults.append(_create_human_dronegun_raven_template())
 
 	# Builder units for each faction
 	defaults.append(_create_aether_nano_welder_template())
@@ -1217,3 +1231,486 @@ func export_default_templates() -> int:
 
 	print("UnitTemplateManager: Exported %d templates" % exported)
 	return exported
+
+
+# =============================================================================
+# OPTIFORGE LEGION - NEW UNITS (PRD-specified)
+# =============================================================================
+
+## Create OptiForge Blitzkin template - fast melee rusher with vibro-fists.
+func _create_optiforge_blitzkin_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "optiforge_blitzkin"
+	template.faction_key = "optiforge_legion"
+	template.unit_type = "blitzkin"
+	template.display_name = "Blitzkin"
+	template.description = "Lightning-fast humanoid rusher with vibro-fists that devastate in melee."
+	template.base_stats = {
+		"max_health": 60.0,
+		"health_regen": 0.5,
+		"max_speed": 14.0,
+		"acceleration": 70.0,
+		"turn_rate": 8.0,
+		"armor": 0.05,
+		"base_damage": 12.0,
+		"attack_speed": 2.0,
+		"attack_range": 2.5,
+		"vision_range": 18.0,
+		"vibro_fist_damage_bonus": 0.3,
+		"rush_speed_mult": 1.8,
+		"rush_duration": 1.5,
+		"rush_cooldown": 5.0
+	}
+	template.production_cost = {"ree": 80, "energy": 25, "time": 4.0}
+	template.abilities = ["vibro_fist", "blitz_rush", "adaptive_evolution"]
+	template.tags = ["light", "melee", "fast", "rusher"]
+	template._validate()
+	return template
+
+
+## Create OptiForge Pulseforged template - energy whip humanoid.
+func _create_optiforge_pulseforged_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "optiforge_pulseforged"
+	template.faction_key = "optiforge_legion"
+	template.unit_type = "pulseforged"
+	template.display_name = "Pulseforged"
+	template.description = "Humanoid warrior wielding deadly energy whips with extended reach."
+	template.base_stats = {
+		"max_health": 85.0,
+		"health_regen": 0.5,
+		"max_speed": 9.0,
+		"acceleration": 45.0,
+		"turn_rate": 5.0,
+		"armor": 0.1,
+		"base_damage": 15.0,
+		"attack_speed": 1.2,
+		"attack_range": 6.0,
+		"vision_range": 20.0,
+		"whip_arc": 120.0,
+		"whip_chain_targets": 3,
+		"energy_drain_per_hit": 2.0
+	}
+	template.production_cost = {"ree": 100, "energy": 40, "time": 5.0}
+	template.abilities = ["energy_whip", "chain_lightning", "adaptive_evolution"]
+	template.tags = ["medium", "melee", "aoe", "chain"]
+	template._validate()
+	return template
+
+
+## Create OptiForge Jetkin template - backpack thruster air-to-ground striker.
+func _create_optiforge_jetkin_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "optiforge_jetkin"
+	template.faction_key = "optiforge_legion"
+	template.unit_type = "jetkin"
+	template.display_name = "Jetkin"
+	template.description = "Humanoid with backpack thrusters for devastating dive attacks."
+	template.base_stats = {
+		"max_health": 55.0,
+		"health_regen": 0.5,
+		"max_speed": 12.0,
+		"acceleration": 65.0,
+		"turn_rate": 7.0,
+		"armor": 0.05,
+		"base_damage": 18.0,
+		"attack_speed": 0.8,
+		"attack_range": 8.0,
+		"vision_range": 25.0,
+		"dive_attack_damage_mult": 2.0,
+		"dive_attack_range": 20.0,
+		"hover_height": 5.0,
+		"fuel_capacity": 10.0,
+		"fuel_regen": 2.0
+	}
+	template.production_cost = {"ree": 120, "energy": 50, "time": 6.0}
+	template.abilities = ["jet_boost", "dive_attack", "hover", "adaptive_evolution"]
+	template.tags = ["medium", "aerial", "striker", "flying"]
+	template._validate()
+	return template
+
+
+## Create OptiForge Hullbreaker template - sapper that cracks armor plating.
+func _create_optiforge_hullbreaker_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "optiforge_hullbreaker"
+	template.faction_key = "optiforge_legion"
+	template.unit_type = "hullbreaker"
+	template.display_name = "Hullbreaker"
+	template.description = "Specialized sapper unit that cracks enemy armor plating."
+	template.base_stats = {
+		"max_health": 70.0,
+		"health_regen": 0.0,
+		"max_speed": 7.0,
+		"acceleration": 35.0,
+		"turn_rate": 4.0,
+		"armor": 0.15,
+		"base_damage": 25.0,
+		"attack_speed": 0.6,
+		"attack_range": 3.0,
+		"vision_range": 15.0,
+		"armor_shred_percent": 0.5,
+		"armor_shred_duration": 8.0,
+		"breach_charge_damage": 80.0,
+		"breach_charge_cooldown": 15.0
+	}
+	template.production_cost = {"ree": 90, "energy": 35, "time": 5.5}
+	template.abilities = ["armor_shred", "breach_charge", "adaptive_evolution"]
+	template.tags = ["medium", "melee", "anti_armor", "sapper"]
+	template._validate()
+	return template
+
+
+## Create OptiForge Eyeforge template - spotter/scout unit.
+func _create_optiforge_eyeforge_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "optiforge_eyeforge"
+	template.faction_key = "optiforge_legion"
+	template.unit_type = "eyeforge"
+	template.display_name = "Eyeforge"
+	template.description = "Scout unit with enhanced vision and target designation."
+	template.base_stats = {
+		"max_health": 40.0,
+		"health_regen": 0.5,
+		"max_speed": 11.0,
+		"acceleration": 55.0,
+		"turn_rate": 6.0,
+		"armor": 0.0,
+		"base_damage": 5.0,
+		"attack_speed": 1.0,
+		"attack_range": 12.0,
+		"vision_range": 40.0,
+		"reveal_stealth_range": 20.0,
+		"target_designation_bonus": 0.25,
+		"designation_duration": 10.0
+	}
+	template.production_cost = {"ree": 60, "energy": 30, "time": 4.0}
+	template.abilities = ["enhanced_vision", "target_designation", "reveal_stealth"]
+	template.tags = ["light", "scout", "support", "recon"]
+	template._validate()
+	return template
+
+
+# =============================================================================
+# LOGIBOTS COLOSSUS - NEW UNITS (PRD-specified)
+# =============================================================================
+
+## Create LogiBots Crushkin template - AoE punisher.
+func _create_logibots_crushkin_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "logibots_crushkin"
+	template.faction_key = "logibots_colossus"
+	template.unit_type = "crushkin"
+	template.display_name = "Crushkin"
+	template.description = "Heavy logistics unit repurposed for devastating AoE ground attacks."
+	template.base_stats = {
+		"max_health": 180.0,
+		"health_regen": 0.0,
+		"max_speed": 4.0,
+		"acceleration": 20.0,
+		"turn_rate": 2.5,
+		"armor": 0.3,
+		"base_damage": 30.0,
+		"attack_speed": 0.5,
+		"attack_range": 5.0,
+		"vision_range": 16.0,
+		"crush_radius": 8.0,
+		"crush_damage": 40.0,
+		"ground_shake_slow": 0.4,
+		"ground_shake_duration": 2.0,
+		"mass": 350.0
+	}
+	template.rendering = {
+		"mesh_path": "res://assets/units/logibots/crushkin.tscn",
+		"material_path": "",
+		"scale": Vector3(1.3, 1.3, 1.3),
+		"use_multimesh": false,
+		"lod_distances": [25.0, 50.0, 80.0]
+	}
+	template.production_cost = {"ree": 200, "energy": 80, "time": 10.0}
+	template.abilities = ["crush_attack", "ground_shake", "synchronized_strikes"]
+	template.tags = ["heavy", "melee", "aoe", "industrial"]
+	template.uses_heavy_physics = true
+	template._validate()
+	return template
+
+
+## Create LogiBots Siegehaul template - long-range artillery breacher.
+func _create_logibots_siegehaul_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "logibots_siegehaul"
+	template.faction_key = "logibots_colossus"
+	template.unit_type = "siegehaul"
+	template.display_name = "Siegehaul"
+	template.description = "Heavy siege platform with devastating long-range bombardment."
+	template.base_stats = {
+		"max_health": 220.0,
+		"health_regen": 0.0,
+		"max_speed": 3.0,
+		"acceleration": 15.0,
+		"turn_rate": 1.5,
+		"armor": 0.35,
+		"base_damage": 60.0,
+		"attack_speed": 0.25,
+		"attack_range": 35.0,
+		"vision_range": 20.0,
+		"aoe_radius": 10.0,
+		"projectile_arc": true,
+		"min_range": 12.0,
+		"siege_mode_range_bonus": 15.0,
+		"siege_mode_damage_bonus": 0.5,
+		"deploy_time": 3.0,
+		"mass": 500.0
+	}
+	template.rendering = {
+		"mesh_path": "res://assets/units/logibots/siegehaul.tscn",
+		"material_path": "",
+		"scale": Vector3(1.5, 1.5, 1.5),
+		"use_multimesh": false,
+		"lod_distances": [30.0, 60.0, 100.0]
+	}
+	template.production_cost = {"ree": 350, "energy": 120, "time": 15.0}
+	template.abilities = ["siege_mode", "bombardment", "coordinated_barrage"]
+	template.tags = ["heavy", "artillery", "siege", "ranged"]
+	template.uses_heavy_physics = true
+	template._validate()
+	return template
+
+
+## Create LogiBots Titanclad template - walking fortress tank.
+func _create_logibots_titanclad_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "logibots_titanclad"
+	template.faction_key = "logibots_colossus"
+	template.unit_type = "titanclad"
+	template.display_name = "Titanclad"
+	template.description = "Massive walking fortress that absorbs tremendous punishment."
+	template.base_stats = {
+		"max_health": 400.0,
+		"health_regen": 0.0,
+		"max_speed": 2.5,
+		"acceleration": 10.0,
+		"turn_rate": 1.0,
+		"armor": 0.5,
+		"base_damage": 25.0,
+		"attack_speed": 0.6,
+		"attack_range": 10.0,
+		"vision_range": 18.0,
+		"damage_reduction_aura_radius": 12.0,
+		"damage_reduction_aura_amount": 0.2,
+		"taunt_radius": 15.0,
+		"taunt_duration": 5.0,
+		"fortify_armor_bonus": 0.3,
+		"mass": 800.0
+	}
+	template.rendering = {
+		"mesh_path": "res://assets/units/logibots/titanclad.tscn",
+		"material_path": "",
+		"scale": Vector3(1.8, 1.8, 1.8),
+		"use_multimesh": false,
+		"lod_distances": [25.0, 50.0, 80.0]
+	}
+	template.production_cost = {"ree": 500, "energy": 200, "time": 20.0}
+	template.abilities = ["fortify", "damage_aura", "taunt", "armor_stacking"]
+	template.tags = ["heavy", "tank", "fortress", "defensive"]
+	template.uses_heavy_physics = true
+	template._validate()
+	return template
+
+
+## Create LogiBots Gridbreaker template - power blackout creator.
+func _create_logibots_gridbreaker_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "logibots_gridbreaker"
+	template.faction_key = "logibots_colossus"
+	template.unit_type = "gridbreaker"
+	template.display_name = "Gridbreaker"
+	template.description = "Specialist unit that creates localized power blackouts."
+	template.base_stats = {
+		"max_health": 120.0,
+		"health_regen": 0.0,
+		"max_speed": 5.0,
+		"acceleration": 25.0,
+		"turn_rate": 3.0,
+		"armor": 0.2,
+		"base_damage": 15.0,
+		"attack_speed": 0.8,
+		"attack_range": 8.0,
+		"vision_range": 22.0,
+		"emp_radius": 20.0,
+		"emp_duration": 8.0,
+		"emp_cooldown": 30.0,
+		"power_drain_rate": 10.0,
+		"mass": 200.0
+	}
+	template.production_cost = {"ree": 180, "energy": 100, "time": 9.0}
+	template.abilities = ["emp_pulse", "power_drain", "grid_disruption"]
+	template.tags = ["medium", "support", "emp", "disruption"]
+	template._validate()
+	return template
+
+
+# =============================================================================
+# HUMAN REMNANT - NEW UNITS (PRD-specified)
+# =============================================================================
+
+## Create Human M4 Fireteam template - anti-swarm infantry.
+func _create_human_m4_fireteam_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "human_m4_fireteam"
+	template.faction_key = "human_remnant"
+	template.unit_type = "m4_fireteam"
+	template.display_name = "M4 Fireteam"
+	template.description = "Four-man infantry squad effective against robot swarms."
+	template.base_stats = {
+		"max_health": 80.0,
+		"health_regen": 0.5,
+		"max_speed": 5.5,
+		"acceleration": 35.0,
+		"turn_rate": 5.0,
+		"armor": 0.15,
+		"base_damage": 12.0,
+		"attack_speed": 1.5,
+		"attack_range": 18.0,
+		"vision_range": 22.0,
+		"squad_size": 4,
+		"suppression_bonus": 0.3,
+		"anti_swarm_bonus": 0.5
+	}
+	template.production_cost = {"ree": 0, "energy": 0, "time": 0.0}  # AI spawned
+	template.abilities = ["suppressive_fire", "take_cover", "anti_swarm"]
+	template.tags = ["light", "infantry", "human", "squad", "anti_swarm"]
+	template._validate()
+	return template
+
+
+## Create Human Javelin Ghost template - anti-armor missile team.
+func _create_human_javelin_ghost_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "human_javelin_ghost"
+	template.faction_key = "human_remnant"
+	template.unit_type = "javelin_ghost"
+	template.display_name = "Javelin Ghost"
+	template.description = "Stealthy anti-armor team with top-attack missiles."
+	template.base_stats = {
+		"max_health": 50.0,
+		"health_regen": 0.0,
+		"max_speed": 4.5,
+		"acceleration": 30.0,
+		"turn_rate": 4.0,
+		"armor": 0.1,
+		"base_damage": 80.0,
+		"attack_speed": 0.15,
+		"attack_range": 30.0,
+		"vision_range": 35.0,
+		"missile_tracking": true,
+		"top_attack_bonus": 0.5,
+		"reload_time": 6.0,
+		"stealth_when_stationary": true
+	}
+	template.production_cost = {"ree": 0, "energy": 0, "time": 0.0}  # AI spawned
+	template.abilities = ["javelin_missile", "top_attack", "stealth_position"]
+	template.tags = ["light", "anti_armor", "human", "stealth", "missile"]
+	template._validate()
+	return template
+
+
+## Create Human M1 Abrams template - main battle tank.
+func _create_human_m1_abrams_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "human_m1_abrams"
+	template.faction_key = "human_remnant"
+	template.unit_type = "m1_abrams"
+	template.display_name = "M1 Abrams"
+	template.description = "Heavy main battle tank with devastating firepower."
+	template.base_stats = {
+		"max_health": 350.0,
+		"health_regen": 0.0,
+		"max_speed": 6.0,
+		"acceleration": 20.0,
+		"turn_rate": 2.0,
+		"armor": 0.6,
+		"base_damage": 100.0,
+		"attack_speed": 0.2,
+		"attack_range": 40.0,
+		"vision_range": 30.0,
+		"turret_turn_rate": 3.0,
+		"coax_damage": 15.0,
+		"coax_attack_speed": 2.0,
+		"smoke_grenade_count": 3,
+		"mass": 600.0
+	}
+	template.rendering = {
+		"mesh_path": "res://assets/units/human/m1_abrams.tscn",
+		"material_path": "",
+		"scale": Vector3(1.0, 1.0, 1.0),
+		"use_multimesh": false,
+		"lod_distances": [40.0, 80.0, 150.0]
+	}
+	template.production_cost = {"ree": 0, "energy": 0, "time": 0.0}  # AI spawned
+	template.abilities = ["main_gun", "coax_mg", "smoke_screen"]
+	template.tags = ["heavy", "tank", "human", "armored"]
+	template.uses_heavy_physics = true
+	template._validate()
+	return template
+
+
+## Create Human Stryker MGS template - mobile gun system.
+func _create_human_stryker_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "human_stryker"
+	template.faction_key = "human_remnant"
+	template.unit_type = "stryker"
+	template.display_name = "Stryker MGS"
+	template.description = "Fast wheeled armored vehicle with 105mm gun."
+	template.base_stats = {
+		"max_health": 180.0,
+		"health_regen": 0.0,
+		"max_speed": 9.0,
+		"acceleration": 35.0,
+		"turn_rate": 4.0,
+		"armor": 0.3,
+		"base_damage": 50.0,
+		"attack_speed": 0.4,
+		"attack_range": 30.0,
+		"vision_range": 28.0,
+		"transport_capacity": 6,
+		"rapid_deploy": true,
+		"mass": 250.0
+	}
+	template.production_cost = {"ree": 0, "energy": 0, "time": 0.0}  # AI spawned
+	template.abilities = ["mobile_gun", "rapid_deploy", "transport"]
+	template.tags = ["medium", "vehicle", "human", "fast", "transport"]
+	template._validate()
+	return template
+
+
+## Create Human DroneGun Raven template - anti-drone jammer.
+func _create_human_dronegun_raven_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "human_dronegun_raven"
+	template.faction_key = "human_remnant"
+	template.unit_type = "dronegun_raven"
+	template.display_name = "DroneGun Raven"
+	template.description = "Electronic warfare specialist that jams and disables swarms."
+	template.base_stats = {
+		"max_health": 60.0,
+		"health_regen": 0.0,
+		"max_speed": 5.0,
+		"acceleration": 30.0,
+		"turn_rate": 4.0,
+		"armor": 0.1,
+		"base_damage": 5.0,
+		"attack_speed": 0.5,
+		"attack_range": 25.0,
+		"vision_range": 30.0,
+		"jam_radius": 30.0,
+		"jam_effectiveness": 0.7,
+		"disable_duration": 3.0,
+		"disable_cooldown": 10.0
+	}
+	template.production_cost = {"ree": 0, "energy": 0, "time": 0.0}  # AI spawned
+	template.abilities = ["swarm_jam", "disable_drones", "electronic_warfare"]
+	template.tags = ["light", "support", "human", "electronic_warfare", "anti_swarm"]
+	template._validate()
+	return template

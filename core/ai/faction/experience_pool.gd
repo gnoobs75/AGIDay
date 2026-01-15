@@ -114,7 +114,7 @@ func unregister_unit(unit_id: int, faction_id: String) -> void:
 	if not _faction_units.has(faction_id):
 		return
 
-	var idx := _faction_units[faction_id].find(unit_id)
+	var idx: int = _faction_units[faction_id].find(unit_id)
 	if idx != -1:
 		_faction_units[faction_id].remove_at(idx)
 

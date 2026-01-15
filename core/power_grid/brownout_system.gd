@@ -278,8 +278,8 @@ func balance_load(faction_id: String, available_power: float, district_demands: 
 		else:
 			# Proportionally allocate remaining power
 			for district_id in group:
-				var ratio := district_demands[district_id] / group_demand if group_demand > 0 else 0.0
-				allocations[district_id] = remaining_power * ratio
+				var alloc_ratio: float = district_demands[district_id] / group_demand if group_demand > 0 else 0.0
+				allocations[district_id] = remaining_power * alloc_ratio
 			remaining_power = 0.0
 
 	var affected := 0

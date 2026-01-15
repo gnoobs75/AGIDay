@@ -1,6 +1,6 @@
-class_name VoxelState
+class_name VoxelStateData
 extends RefCounted
-## VoxelState represents individual voxel data for destruction tracking.
+## VoxelStateData represents individual voxel data for destruction tracking.
 ## Stores position, HP, stage, timing, and node type flags.
 
 ## Position in voxel grid
@@ -175,8 +175,8 @@ func from_dict(data: Dictionary) -> void:
 
 
 ## Create copy of voxel state.
-func duplicate() -> VoxelState:
-	var copy := VoxelState.new(position, max_hp)
+func duplicate() -> VoxelStateData:
+	var copy := VoxelStateData.new(position, max_hp)
 	copy.current_hp = current_hp
 	copy.stage = stage
 	copy.last_damage_time = last_damage_time
@@ -189,7 +189,7 @@ func duplicate() -> VoxelState:
 
 ## Get debug string.
 func _to_string() -> String:
-	return "VoxelState(%s, HP:%d/%d, Stage:%s)" % [
+	return "VoxelStateData(%s, HP:%d/%d, Stage:%s)" % [
 		position,
 		current_hp,
 		max_hp,

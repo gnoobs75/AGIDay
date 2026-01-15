@@ -1,9 +1,10 @@
 ; Engine configuration file.
 ; It's best edited using the editor UI and not directly,
-; but it can also be manually edited.
+; since the parameters that go here are not all obvious.
+;
 ; Format:
-;   [section]
-;   key=value
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
 
 config_version=5
 
@@ -12,7 +13,7 @@ config_version=5
 config/name="AGI Day: The Awakening"
 config/description="Top-down 3D RTS/bullet-hell hybrid built in Godot 4.5"
 config/version="0.1.0"
-run/main_scene=""
+run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.5", "Forward Plus")
 config/icon="res://icon.svg"
 
@@ -35,10 +36,6 @@ window/size/viewport_width=1920
 window/size/viewport_height=1080
 window/size/mode=2
 
-[physics]
+[dotnet]
 
-common/physics_ticks_per_second=60
-
-[rendering]
-
-renderer/rendering_method="forward_plus"
+project/assembly_name="AGI Day- The Awakening"

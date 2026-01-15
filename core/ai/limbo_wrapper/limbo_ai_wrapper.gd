@@ -30,65 +30,65 @@ const KEY_MOVEMENT := "movement_"
 
 
 ## Create a new behavior tree root.
-static func create_tree(tree_name: String) -> BTNode:
-	return BTNode.new(tree_name, NodeType.SELECTOR)
+static func create_tree(tree_name: String) -> LimboBTNode:
+	return LimboBTNode.new(tree_name, NodeType.SELECTOR)
 
 
 ## Create selector node (OR logic - first success wins).
-static func create_selector(name: String) -> BTNode:
-	return BTNode.new(name, NodeType.SELECTOR)
+static func create_selector(name: String) -> LimboBTNode:
+	return LimboBTNode.new(name, NodeType.SELECTOR)
 
 
 ## Create sequence node (AND logic - all must succeed).
-static func create_sequence(name: String) -> BTNode:
-	return BTNode.new(name, NodeType.SEQUENCE)
+static func create_sequence(name: String) -> LimboBTNode:
+	return LimboBTNode.new(name, NodeType.SEQUENCE)
 
 
 ## Create parallel node (runs all children simultaneously).
-static func create_parallel(name: String, success_threshold: int = 1) -> BTNode:
-	var node := BTNode.new(name, NodeType.PARALLEL)
-	node.set_meta("success_threshold", success_threshold)
+static func create_parallel(name: String, success_threshold: int = 1) -> LimboBTNode:
+	var node := LimboBTNode.new(name, NodeType.PARALLEL)
+	node.set_bt_meta("success_threshold", success_threshold)
 	return node
 
 
 ## Create condition node.
-static func create_condition(name: String, condition_func: Callable) -> BTNode:
-	var node := BTNode.new(name, NodeType.CONDITION)
+static func create_condition(name: String, condition_func: Callable) -> LimboBTNode:
+	var node := LimboBTNode.new(name, NodeType.CONDITION)
 	node.set_condition(condition_func)
 	return node
 
 
 ## Create action node.
-static func create_action(name: String, action_func: Callable) -> BTNode:
-	var node := BTNode.new(name, NodeType.ACTION)
+static func create_action(name: String, action_func: Callable) -> LimboBTNode:
+	var node := LimboBTNode.new(name, NodeType.ACTION)
 	node.set_action(action_func)
 	return node
 
 
 ## Create inverter decorator.
-static func create_inverter(name: String) -> BTNode:
-	return BTNode.new(name, NodeType.DECORATOR_INVERTER)
+static func create_inverter(name: String) -> LimboBTNode:
+	return LimboBTNode.new(name, NodeType.DECORATOR_INVERTER)
 
 
 ## Create repeater decorator.
-static func create_repeater(name: String, repeat_count: int = -1) -> BTNode:
-	var node := BTNode.new(name, NodeType.DECORATOR_REPEATER)
-	node.set_meta("repeat_count", repeat_count)
+static func create_repeater(name: String, repeat_count: int = -1) -> LimboBTNode:
+	var node := LimboBTNode.new(name, NodeType.DECORATOR_REPEATER)
+	node.set_bt_meta("repeat_count", repeat_count)
 	return node
 
 
 ## Create limiter decorator (limits execution frequency).
-static func create_limiter(name: String, cooldown_seconds: float) -> BTNode:
-	var node := BTNode.new(name, NodeType.DECORATOR_LIMITER)
-	node.set_meta("cooldown", cooldown_seconds)
+static func create_limiter(name: String, cooldown_seconds: float) -> LimboBTNode:
+	var node := LimboBTNode.new(name, NodeType.DECORATOR_LIMITER)
+	node.set_bt_meta("cooldown", cooldown_seconds)
 	return node
 
 
-## BTNode class - wrapper for behavior tree nodes.
-class BTNode extends RefCounted:
+## LimboBTNode class - wrapper for behavior tree nodes.
+class LimboBTNode extends RefCounted:
 	var node_name: String
 	var node_type: int
-	var children: Array[BTNode] = []
+	var children: Array[LimboBTNode] = []
 	var _condition: Callable
 	var _action: Callable
 	var _metadata: Dictionary = {}
@@ -100,7 +100,7 @@ class BTNode extends RefCounted:
 		node_type = p_type
 
 
-	func add_child(child: BTNode) -> BTNode:
+	func add_child(child: LimboBTNode) -> LimboBTNode:
 		children.append(child)
 		return self
 
@@ -113,7 +113,7 @@ class BTNode extends RefCounted:
 		_action = callback
 
 
-	func set_meta(key: String, value: Variant) -> void:
+	func set_bt_meta(key: String, value: Variant) -> void:
 		_metadata[key] = value
 
 

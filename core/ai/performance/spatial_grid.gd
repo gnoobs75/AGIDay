@@ -1,6 +1,6 @@
-class_name SpatialGrid
+class_name AISpatialGrid
 extends RefCounted
-## SpatialGrid provides optimized spatial queries for nearby units and projectiles.
+## AISpatialGrid provides optimized spatial queries for nearby units and projectiles.
 ## Uses cell-based partitioning for O(1) average case lookups.
 
 signal unit_moved(unit_id: int, old_cell: Vector2i, new_cell: Vector2i)

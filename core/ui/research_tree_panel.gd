@@ -260,7 +260,7 @@ func _draw_connections() -> void:
 
 		# Get line color based on target state
 		var target_state: int = _technologies[to_tech].get("state", TechState.LOCKED)
-		var line_color := STATE_COLORS[target_state].darkened(0.3)
+		var line_color: Color = STATE_COLORS[target_state].darkened(0.3)
 
 		_connection_lines.draw_line(from_center, to_center, line_color, 2.0, true)
 

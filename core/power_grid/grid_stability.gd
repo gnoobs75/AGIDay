@@ -58,7 +58,7 @@ func calculate_stability(faction_id: String) -> Dictionary:
 		return stability_data
 
 	# Get power status
-	var status := _power_api.get_faction_power_status(faction_id)
+	var status: Dictionary = _power_api.get_faction_power_status(faction_id)
 	var generation: float = status.get("generation", 0.0)
 	var consumption := 0.0
 
@@ -202,10 +202,10 @@ func _identify_vulnerabilities(faction_id: String, status: Dictionary) -> Array:
 
 
 ## Generate recommendations.
-func _generate_recommendations(stability_data: Dictionary) -> Array:
+func _generate_recommendations(p_stability_data: Dictionary) -> Array:
 	var recommendations: Array = []
-	var risk_level: int = stability_data["risk_level"]
-	var balance: float = stability_data["balance"]
+	var risk_level: int = p_stability_data["risk_level"]
+	var balance: float = p_stability_data["balance"]
 
 	if risk_level >= RiskLevel.CRITICAL:
 		recommendations.append("URGENT: Build additional power plants immediately")
@@ -214,10 +214,10 @@ func _generate_recommendations(stability_data: Dictionary) -> Array:
 		var deficit := abs(balance)
 		recommendations.append("Power deficit of %.0f - reduce consumption or add generation" % deficit)
 
-	if stability_data["reserve_ratio"] < 1.2:
+	if p_stability_data["reserve_ratio"] < 1.2:
 		recommendations.append("Build reserve capacity - target 20%% over demand")
 
-	for vuln in stability_data["vulnerabilities"]:
+	for vuln in p_stability_data["vulnerabilities"]:
 		match vuln["type"]:
 			"single_point_of_failure":
 				recommendations.append("Build backup power plant to reduce vulnerability")

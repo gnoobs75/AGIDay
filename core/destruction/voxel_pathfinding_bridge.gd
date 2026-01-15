@@ -114,7 +114,7 @@ func flush_updates() -> void:
 	# Emit blocked cells changed
 	var blocked_positions: Array[Vector3i] = []
 	for key in _blocked_cells:
-		var parts := key.split(",")
+		var parts: PackedStringArray = key.split(",")
 		if parts.size() == 2:
 			blocked_positions.append(Vector3i(int(parts[0]), 0, int(parts[1])))
 
@@ -157,7 +157,7 @@ func is_blocked(position: Vector3i) -> bool:
 func get_blocked_positions() -> Array[Vector3i]:
 	var result: Array[Vector3i] = []
 	for key in _blocked_cells:
-		var parts := key.split(",")
+		var parts: PackedStringArray = key.split(",")
 		if parts.size() == 2:
 			result.append(Vector3i(int(parts[0]), 0, int(parts[1])))
 	return result

@@ -82,7 +82,7 @@ func create_ui(parent: Control, player_faction: String = "neutral") -> Control:
 
 ## Create a faction progress bar.
 func _create_faction_bar(faction_id: String) -> void:
-	var faction_color := UITheme.FACTION_COLORS.get(faction_id, Color.GRAY)
+	var faction_color: Color = UITheme.FACTION_COLORS.get(faction_id, Color.GRAY)
 
 	var row := HBoxContainer.new()
 	row.name = "FactionRow_%s" % faction_id
@@ -193,7 +193,7 @@ func _update_display() -> void:
 		count_label.text = "(%d)" % count
 
 		# Hide factions with 0 districts (except player and neutral)
-		var should_show := count > 0 or faction_id == _player_faction or faction_id == "neutral"
+		var should_show: bool = count > 0 or faction_id == _player_faction or faction_id == "neutral"
 		row.visible = should_show
 
 

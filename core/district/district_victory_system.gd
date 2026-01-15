@@ -34,7 +34,7 @@ enum DistrictCategory {
 }
 
 ## References
-var _district_manager: DistrictManager = null
+var _district_manager: DistrictZoneManager = null
 
 ## Resource callbacks
 var _add_power_callback: Callable = Callable()
@@ -58,7 +58,7 @@ func _init() -> void:
 
 
 ## Initialize with district manager.
-func initialize(district_manager: DistrictManager) -> void:
+func initialize(district_manager: DistrictZoneManager) -> void:
 	_district_manager = district_manager
 
 
@@ -98,7 +98,7 @@ func _distribute_income() -> void:
 		if faction_data["eliminated"]:
 			continue
 
-		var districts := _district_manager.get_faction_districts(faction_id)
+		var districts: Array[DistrictZone] = _district_manager.get_faction_districts(faction_id)
 		if districts.is_empty():
 			continue
 
@@ -132,7 +132,7 @@ func _distribute_income() -> void:
 
 
 ## Calculate income for a district.
-func _calculate_district_income(district: District) -> Dictionary:
+func _calculate_district_income(district: DistrictZone) -> Dictionary:
 	# Get building ratio (buildings / max buildings)
 	var max_buildings := 10  # Default max
 	var building_ratio := float(district.building_count) / float(max_buildings)
@@ -171,17 +171,17 @@ func _calculate_district_income(district: District) -> Dictionary:
 
 
 ## Get district category.
-func _get_district_category(district: District) -> int:
+func _get_district_category(district: DistrictZone) -> int:
 	match district.district_type:
-		District.DistrictType.CORNER:
+		DistrictZone.DistrictType.CORNER:
 			return DistrictCategory.POWER_HUB
-		District.DistrictType.EDGE:
+		DistrictZone.DistrictType.EDGE:
 			return DistrictCategory.REE_NODE
-		District.DistrictType.CENTER:
+		DistrictZone.DistrictType.CENTER:
 			return DistrictCategory.RESEARCH
-		District.DistrictType.INDUSTRIAL, District.DistrictType.COMMERCIAL:
+		DistrictZone.DistrictType.INDUSTRIAL, DistrictZone.DistrictType.COMMERCIAL:
 			return DistrictCategory.MIXED
-		District.DistrictType.RESIDENTIAL:
+		DistrictZone.DistrictType.RESIDENTIAL:
 			if district.building_count > 0:
 				return DistrictCategory.MIXED
 			return DistrictCategory.EMPTY
@@ -192,7 +192,7 @@ func _get_district_category(district: District) -> int:
 ## Update faction district counts.
 func _update_faction_districts() -> void:
 	for faction_id in _active_factions:
-		var count := _district_manager.get_faction_districts(faction_id).size()
+		var count: int = _district_manager.get_faction_districts(faction_id).size()
 		_active_factions[faction_id]["districts"] = count
 
 		# Check for elimination
@@ -285,13 +285,13 @@ func get_faction_status(faction_id: String) -> Dictionary:
 
 ## Get domination progress.
 func get_domination_progress(faction_id: String) -> float:
-	var count := _active_factions.get(faction_id, {}).get("districts", 0)
+	var count: int = _active_factions.get(faction_id, {}).get("districts", 0)
 	return float(count) / float(TOTAL_DISTRICTS)
 
 
 ## Get estimated income for faction.
 func get_estimated_income(faction_id: String) -> Dictionary:
-	var districts := _district_manager.get_faction_districts(faction_id)
+	var districts: Array[DistrictZone] = _district_manager.get_faction_districts(faction_id)
 
 	var total := {"power": 0.0, "ree": 0.0, "research": 0.0}
 

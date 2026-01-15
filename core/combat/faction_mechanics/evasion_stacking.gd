@@ -162,7 +162,7 @@ func get_dodge_stats(unit_id: int) -> Dictionary:
 		return {"dodges": 0, "hits": 0, "rate": 0.0}
 
 	var data: Dictionary = _unit_evasion[unit_id]
-	var total := data["total_dodges"] + data["total_hits"]
+	var total: int = data["total_dodges"] + data["total_hits"]
 	var rate := 0.0
 	if total > 0:
 		rate = float(data["total_dodges"]) / float(total)

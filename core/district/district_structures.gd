@@ -26,12 +26,12 @@ enum StructureType {
 
 ## District type to allowed structures
 const DISTRICT_ALLOWED_STRUCTURES := {
-	District.DistrictType.RESIDENTIAL: [StructureType.RESIDENTIAL, StructureType.COMMERCIAL, StructureType.WATCHTOWER],
-	District.DistrictType.INDUSTRIAL: [StructureType.FACTORY, StructureType.WORKSHOP, StructureType.ADVANCED_FACTORY, StructureType.WATCHTOWER],
-	District.DistrictType.COMMERCIAL: [StructureType.COMMERCIAL, StructureType.RESIDENTIAL, StructureType.WATCHTOWER],
-	District.DistrictType.CORNER: [StructureType.POWER_PLANT, StructureType.SUBSTATION, StructureType.FUSION_REACTOR],
-	District.DistrictType.EDGE: [StructureType.FACTORY, StructureType.WATCHTOWER, StructureType.WORKSHOP],
-	District.DistrictType.CENTER: [StructureType.RESEARCH_LAB, StructureType.DATA_CENTER, StructureType.ADVANCED_LAB, StructureType.WATCHTOWER]
+	DistrictZone.DistrictType.RESIDENTIAL: [StructureType.RESIDENTIAL, StructureType.COMMERCIAL, StructureType.WATCHTOWER],
+	DistrictZone.DistrictType.INDUSTRIAL: [StructureType.FACTORY, StructureType.WORKSHOP, StructureType.ADVANCED_FACTORY, StructureType.WATCHTOWER],
+	DistrictZone.DistrictType.COMMERCIAL: [StructureType.COMMERCIAL, StructureType.RESIDENTIAL, StructureType.WATCHTOWER],
+	DistrictZone.DistrictType.CORNER: [StructureType.POWER_PLANT, StructureType.SUBSTATION, StructureType.FUSION_REACTOR],
+	DistrictZone.DistrictType.EDGE: [StructureType.FACTORY, StructureType.WATCHTOWER, StructureType.WORKSHOP],
+	DistrictZone.DistrictType.CENTER: [StructureType.RESEARCH_LAB, StructureType.DATA_CENTER, StructureType.ADVANCED_LAB, StructureType.WATCHTOWER]
 }
 
 ## Default bonus values

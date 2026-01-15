@@ -24,7 +24,7 @@ const REE_DISTRICT_DESTRUCTION_BONUS := 1.5
 const RESEARCH_DISTRICT_BONUS := 0.2  ## 20% faster research per research district
 
 ## System references
-var _district_manager: DistrictManager = null
+var _district_manager: DistrictZoneManager = null
 var _power_system = null  ## Power grid system
 var _pathfinding_system = null  ## Navigation system
 var _fog_system = null  ## Fog of war system
@@ -50,7 +50,7 @@ func _init() -> void:
 
 
 ## Initialize with district manager.
-func initialize(district_manager: DistrictManager) -> void:
+func initialize(district_manager: DistrictZoneManager) -> void:
 	_district_manager = district_manager
 
 	# Connect to district signals
@@ -230,7 +230,7 @@ func get_destruction_ree_bonus(district_id: int) -> float:
 		return 1.0
 
 	# REE districts (edge type) give bonus
-	if district.district_type == District.DistrictType.EDGE:
+	if district.district_type == DistrictZone.DistrictType.EDGE:
 		return REE_DISTRICT_DESTRUCTION_BONUS
 
 	return 1.0
@@ -259,7 +259,7 @@ func get_research_acceleration(faction_id: String) -> float:
 
 	for district in districts:
 		# Center districts (research) provide bonus
-		if district.district_type == District.DistrictType.CENTER:
+		if district.district_type == DistrictZone.DistrictType.CENTER:
 			acceleration += RESEARCH_DISTRICT_BONUS
 
 	return acceleration

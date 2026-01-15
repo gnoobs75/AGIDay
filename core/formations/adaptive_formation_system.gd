@@ -213,7 +213,7 @@ func _check_squad_splits(positions: Dictionary) -> void:
 
 		for unit_id in squad.get_unit_ids():
 			if positions.has(unit_id):
-				var distance := positions[unit_id].distance_to(center)
+				var distance: float = positions[unit_id].distance_to(center)
 				if distance > SPLIT_DISTANCE:
 					far_units.append(unit_id)
 

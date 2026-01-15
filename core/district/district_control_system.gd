@@ -23,7 +23,7 @@ const FACTION_STARTING_POSITIONS := {
 }
 
 ## District manager reference
-var _district_manager: DistrictManager = null
+var _district_manager: DistrictZoneManager = null
 
 ## Resource system callbacks
 var _add_ree_callback: Callable = Callable()
@@ -42,7 +42,7 @@ func _init() -> void:
 
 
 ## Initialize with district manager.
-func initialize(district_manager: DistrictManager) -> void:
+func initialize(district_manager: DistrictZoneManager) -> void:
 	_district_manager = district_manager
 	_district_manager.district_captured.connect(_on_district_captured)
 
@@ -69,7 +69,7 @@ func assign_starting_districts(faction_ids: Array[String]) -> void:
 
 		# Create starting district
 		var name := "%s_start" % faction_id
-		var district := _district_manager.create_corner_district(name, corner, faction_id)
+		var district: DistrictZone = _district_manager.create_corner_district(name, corner, faction_id)
 
 		# Ensure district is powered and generating
 		district.set_power_state(true, district.power_consumption)
@@ -92,7 +92,7 @@ func update(delta: float) -> void:
 ## Generate income tick for all factions.
 func _generate_income_tick() -> void:
 	for faction_id in _active_factions:
-		var districts := _district_manager.get_faction_districts(faction_id)
+		var districts: Array[DistrictZone] = _district_manager.get_faction_districts(faction_id)
 		if districts.is_empty():
 			continue
 
@@ -101,7 +101,7 @@ func _generate_income_tick() -> void:
 
 		for district in districts:
 			# Only generate if district has power and isn't contested
-			var multiplier := district.get_income_multiplier()
+			var multiplier: float = district.get_income_multiplier()
 
 			total_ree += BASE_REE_PER_DISTRICT * multiplier
 			total_power += BASE_POWER_PER_DISTRICT * multiplier
@@ -141,7 +141,7 @@ func attempt_capture(district_id: int, attacking_faction: String) -> bool:
 
 ## Get income breakdown for faction.
 func get_faction_income_breakdown(faction_id: String) -> Dictionary:
-	var districts := _district_manager.get_faction_districts(faction_id)
+	var districts: Array[DistrictZone] = _district_manager.get_faction_districts(faction_id)
 
 	var breakdown := {
 		"district_count": districts.size(),
@@ -153,7 +153,7 @@ func get_faction_income_breakdown(faction_id: String) -> Dictionary:
 	}
 
 	for district in districts:
-		var multiplier := district.get_income_multiplier()
+		var multiplier: float = district.get_income_multiplier()
 
 		if multiplier < 1.0:
 			breakdown["contested_reduction"] += BASE_REE_PER_DISTRICT * (1.0 - multiplier)
@@ -168,8 +168,8 @@ func get_faction_income_breakdown(faction_id: String) -> Dictionary:
 
 
 ## Get districts available for capture by faction.
-func get_capturable_districts(faction_id: String) -> Array[District]:
-	var capturable: Array[District] = []
+func get_capturable_districts(faction_id: String) -> Array[DistrictZone]:
+	var capturable: Array[DistrictZone] = []
 
 	for district_id in range(1, _district_manager._next_district_id):
 		var district := _district_manager.get_district(district_id)

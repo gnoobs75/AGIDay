@@ -161,7 +161,7 @@ func update_faction_xp(faction_id: String, xp: float) -> void:
 
 ## Get adaptation level for faction.
 func get_adaptation_level(faction_id: String) -> int:
-	var xp := _faction_xp.get(faction_id, 0.0)
+	var xp: float = _faction_xp.get(faction_id, 0.0)
 
 	if _get_faction_xp.is_valid():
 		xp = _get_faction_xp.call(faction_id)

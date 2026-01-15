@@ -1,6 +1,6 @@
-class_name SpatialGrid
+class_name ProjectileSpatialGrid
 extends RefCounted
-## SpatialGrid provides efficient spatial partitioning for collision detection.
+## ProjectileSpatialGrid provides efficient spatial partitioning for collision detection.
 ## Reduces O(n*m) collision checks to O(region_n * region_m).
 
 ## Cell size in world units

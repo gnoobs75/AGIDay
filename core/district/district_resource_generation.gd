@@ -132,13 +132,13 @@ func _get_district_rates(district) -> Dictionary:
 
 	# Map district type enum to rate key
 	match district.district_type:
-		District.DistrictType.CORNER:
+		DistrictZone.DistrictType.CORNER:
 			type_name = "POWER_HUB"
-		District.DistrictType.INDUSTRIAL:
+		DistrictZone.DistrictType.INDUSTRIAL:
 			type_name = "INDUSTRIAL"
-		District.DistrictType.CENTER:
+		DistrictZone.DistrictType.CENTER:
 			type_name = "RESEARCH"
-		District.DistrictType.RESIDENTIAL:
+		DistrictZone.DistrictType.RESIDENTIAL:
 			type_name = "RESIDENTIAL"
 		_:
 			type_name = "MIXED"

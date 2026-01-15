@@ -101,8 +101,8 @@ func _generate_tick() -> void:
 		var buffs: Dictionary = _faction_buffs.get(faction_id, {"ree_mult": 1.0, "power_mult": 1.0})
 
 		if districts > 0:
-			var ree_income := BASE_REE_PER_DISTRICT * districts * buffs["ree_mult"] * scaling
-			var power_income := BASE_POWER_PER_DISTRICT * districts * buffs["power_mult"] * scaling
+			var ree_income: float = BASE_REE_PER_DISTRICT * districts * buffs["ree_mult"] * scaling
+			var power_income: float = BASE_POWER_PER_DISTRICT * districts * buffs["power_mult"] * scaling
 
 			pool.add_ree(ree_income, "district_income")
 			pool.add_power(power_income, "district_income")
@@ -133,8 +133,8 @@ func get_projected_income(faction_id: int) -> Dictionary:
 	var buffs: Dictionary = _faction_buffs.get(faction_id, {"ree_mult": 1.0, "power_mult": 1.0})
 	var scaling := get_scaling_multiplier()
 
-	var ree_per_tick := BASE_REE_PER_DISTRICT * districts * buffs["ree_mult"] * scaling
-	var power_per_tick := BASE_POWER_PER_DISTRICT * districts * buffs["power_mult"] * scaling
+	var ree_per_tick: float = BASE_REE_PER_DISTRICT * districts * buffs["ree_mult"] * scaling
+	var power_per_tick: float = BASE_POWER_PER_DISTRICT * districts * buffs["power_mult"] * scaling
 
 	return {
 		"ree_per_tick": ree_per_tick,

@@ -81,7 +81,7 @@ func add_unit_icon(unit_id: int, faction_id: String, unit_type: String, position
 	if _icons.has(unit_id):
 		return  # Already exists
 
-	var layer := _faction_layers.get(faction_id)
+	var layer: Control = _faction_layers.get(faction_id)
 	if layer == null:
 		layer = _faction_layers.get("neutral")
 
@@ -136,11 +136,11 @@ func add_building_icon(building_id: int, faction_id: String, position: Vector2, 
 	if _icons.has(building_id):
 		return
 
-	var layer := _faction_layers.get(faction_id)
+	var layer: Control = _faction_layers.get(faction_id)
 	if layer == null:
 		layer = _faction_layers.get("neutral")
 
-	var icon_class := "factory" if is_factory else "building"
+	var icon_class: String = "factory" if is_factory else "building"
 	var size: Vector2 = ICON_SIZES[icon_class]
 	var color: Color = FACTION_COLORS.get(faction_id, FACTION_COLORS["neutral"])
 

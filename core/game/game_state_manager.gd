@@ -28,8 +28,8 @@ enum MatchStatus {
 	ENDED = 3
 }
 
-## Faction status data structure
-class FactionStatus:
+## Faction status data structure (inner class to avoid conflict with core/victory/faction_status.gd)
+class MatchFactionStatus:
 	var faction_id: int = 0
 	var faction_name: String = ""
 	var is_player: bool = false
@@ -75,8 +75,8 @@ class FactionStatus:
 			"damage_taken": damage_taken
 		}
 
-	static func from_dict(data: Dictionary) -> FactionStatus:
-		var status := FactionStatus.new()
+	static func from_dict(data: Dictionary) -> MatchFactionStatus:
+		var status := MatchFactionStatus.new()
 		status.faction_id = data.get("faction_id", 0)
 		status.faction_name = data.get("faction_name", "")
 		status.is_player = data.get("is_player", false)
@@ -111,7 +111,7 @@ var _game_result: GameResult = GameResult.NONE
 ## Player faction ID
 var _player_faction_id: int = 0
 
-## Faction statuses (faction_id -> FactionStatus)
+## Faction statuses (faction_id -> Variant)
 var _faction_statuses: Dictionary = {}
 
 ## Duration milestone tracking (in minutes)
@@ -269,7 +269,7 @@ func _initialize_factions() -> void:
 
 	# Create status for each faction type
 	for faction_id in range(1, 6):  # 1-5 from FactionComponent
-		var status := FactionStatus.new()
+		var status := MatchFactionStatus.new()
 		status.faction_id = faction_id
 		status.faction_name = FactionComponent.get_faction_name_for_id(faction_id)
 		status.is_player = (faction_id == _player_faction_id)
@@ -277,23 +277,23 @@ func _initialize_factions() -> void:
 
 
 ## Get faction status
-func get_faction_status(faction_id: int) -> FactionStatus:
+func get_faction_status(faction_id: int) -> Variant:
 	return _faction_statuses.get(faction_id)
 
 
 ## Get all faction statuses
-func get_all_faction_statuses() -> Array[FactionStatus]:
-	var statuses: Array[FactionStatus] = []
+func get_all_faction_statuses() -> Array:
+	var statuses: Array = []
 	for id in _faction_statuses:
 		statuses.append(_faction_statuses[id])
 	return statuses
 
 
 ## Get active (non-eliminated) factions
-func get_active_factions() -> Array[FactionStatus]:
-	var active: Array[FactionStatus] = []
+func get_active_factions() -> Array:
+	var active: Array = []
 	for id in _faction_statuses:
-		var status: FactionStatus = _faction_statuses[id]
+		var status = _faction_statuses[id]
 		if not status.is_eliminated:
 			active.append(status)
 	return active
@@ -301,7 +301,7 @@ func get_active_factions() -> Array[FactionStatus]:
 
 ## Update faction unit count
 func update_faction_unit_count(faction_id: int, count: int) -> void:
-	var status: FactionStatus = _faction_statuses.get(faction_id)
+	var status = _faction_statuses.get(faction_id)
 	if status == null:
 		return
 
@@ -312,7 +312,7 @@ func update_faction_unit_count(faction_id: int, count: int) -> void:
 
 ## Update faction resource amount
 func update_faction_resource(faction_id: int, resource_type: String, amount: float) -> void:
-	var status: FactionStatus = _faction_statuses.get(faction_id)
+	var status = _faction_statuses.get(faction_id)
 	if status == null:
 		return
 
@@ -322,11 +322,11 @@ func update_faction_resource(faction_id: int, resource_type: String, amount: flo
 
 ## Update faction factory count
 func update_faction_factory_count(faction_id: int, count: int) -> void:
-	var status: FactionStatus = _faction_statuses.get(faction_id)
+	var status = _faction_statuses.get(faction_id)
 	if status == null:
 		return
 
-	var previous_count := status.factory_count
+	var previous_count: int = status.factory_count
 	status.factory_count = count
 
 	# Check for elimination (no factories = eliminated)
@@ -338,7 +338,7 @@ func update_faction_factory_count(faction_id: int, count: int) -> void:
 
 ## Update faction building count
 func update_faction_building_count(faction_id: int, count: int) -> void:
-	var status: FactionStatus = _faction_statuses.get(faction_id)
+	var status = _faction_statuses.get(faction_id)
 	if status == null:
 		return
 
@@ -348,7 +348,7 @@ func update_faction_building_count(faction_id: int, count: int) -> void:
 
 ## Update faction district count
 func update_faction_district_count(faction_id: int, count: int) -> void:
-	var status: FactionStatus = _faction_statuses.get(faction_id)
+	var status = _faction_statuses.get(faction_id)
 	if status == null:
 		return
 
@@ -358,42 +358,42 @@ func update_faction_district_count(faction_id: int, count: int) -> void:
 
 ## Record unit created
 func record_unit_created(faction_id: int) -> void:
-	var status: FactionStatus = _faction_statuses.get(faction_id)
+	var status = _faction_statuses.get(faction_id)
 	if status != null:
 		status.units_created += 1
 
 
 ## Record unit lost
 func record_unit_lost(faction_id: int) -> void:
-	var status: FactionStatus = _faction_statuses.get(faction_id)
+	var status = _faction_statuses.get(faction_id)
 	if status != null:
 		status.units_lost += 1
 
 
 ## Record unit killed (by this faction)
 func record_unit_killed(faction_id: int) -> void:
-	var status: FactionStatus = _faction_statuses.get(faction_id)
+	var status = _faction_statuses.get(faction_id)
 	if status != null:
 		status.units_killed += 1
 
 
 ## Record damage dealt
 func record_damage_dealt(faction_id: int, damage: float) -> void:
-	var status: FactionStatus = _faction_statuses.get(faction_id)
+	var status = _faction_statuses.get(faction_id)
 	if status != null:
 		status.damage_dealt += damage
 
 
 ## Record damage taken
 func record_damage_taken(faction_id: int, damage: float) -> void:
-	var status: FactionStatus = _faction_statuses.get(faction_id)
+	var status = _faction_statuses.get(faction_id)
 	if status != null:
 		status.damage_taken += damage
 
 
 ## Eliminate a faction
 func eliminate_faction(faction_id: int) -> void:
-	var status: FactionStatus = _faction_statuses.get(faction_id)
+	var status = _faction_statuses.get(faction_id)
 	if status == null or status.is_eliminated:
 		return
 
@@ -408,12 +408,12 @@ func eliminate_faction(faction_id: int) -> void:
 
 ## Check if faction is eliminated
 func is_faction_eliminated(faction_id: int) -> bool:
-	var status: FactionStatus = _faction_statuses.get(faction_id)
+	var status = _faction_statuses.get(faction_id)
 	return status != null and status.is_eliminated
 
 
 ## Get player faction status
-func get_player_status() -> FactionStatus:
+func get_player_status() -> Variant:
 	return get_faction_status(_player_faction_id)
 
 
@@ -456,7 +456,7 @@ func from_dict(data: Dictionary) -> void:
 	_faction_statuses.clear()
 	var faction_data: Dictionary = data.get("faction_statuses", {})
 	for id in faction_data:
-		_faction_statuses[int(id)] = FactionStatus.from_dict(faction_data[id])
+		_faction_statuses[int(id)] = MatchFactionStatus.from_dict(faction_data[id])
 
 
 ## Check and emit duration milestones (every minute)
@@ -469,7 +469,7 @@ func _check_duration_milestones() -> void:
 
 ## Get match summary for end screen
 func get_match_summary() -> Dictionary:
-	var player_status := get_player_status()
+	var player_status = get_player_status()
 
 	return {
 		"duration": _match_duration,

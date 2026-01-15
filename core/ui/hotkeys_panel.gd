@@ -135,7 +135,7 @@ func _create_ability_button(key: String) -> Control:
 ## Update abilities display.
 func update_abilities(abilities: Array[Dictionary]) -> void:
 	for i in mini(abilities.size(), ABILITY_KEYS.size()):
-		var key := ABILITY_KEYS[i]
+		var key: String = ABILITY_KEYS[i]
 		var ability_data: Dictionary = abilities[i]
 
 		_abilities[key] = {

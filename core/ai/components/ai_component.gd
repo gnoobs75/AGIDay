@@ -1,6 +1,6 @@
-class_name AIComponent
+class_name AIComponentData
 extends RefCounted
-## AIComponent is the ECS component for AI-controlled units.
+## AIComponentData is the ECS component for AI-controlled units.
 ## Integrates with AISystem for behavior tree execution and faction learning.
 
 signal state_changed(old_state: int, new_state: int)

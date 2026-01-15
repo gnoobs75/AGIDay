@@ -20,7 +20,7 @@ func register_ability(ability_id: String, duration: float) -> void:
 
 ## Start cooldown for ability.
 func start_cooldown(ability_id: String, duration: float = -1.0) -> void:
-	var cd := duration if duration > 0 else _durations.get(ability_id, 10.0)
+	var cd: float = duration if duration > 0 else _durations.get(ability_id, 10.0)
 	_cooldowns[ability_id] = cd
 
 
@@ -57,8 +57,8 @@ func get_progress(ability_id: String) -> float:
 	if not is_on_cooldown(ability_id):
 		return 1.0
 
-	var remaining := _cooldowns.get(ability_id, 0.0)
-	var duration := _durations.get(ability_id, 10.0)
+	var remaining: float = _cooldowns.get(ability_id, 0.0)
+	var duration: float = _durations.get(ability_id, 10.0)
 
 	return 1.0 - (remaining / duration) if duration > 0 else 1.0
 

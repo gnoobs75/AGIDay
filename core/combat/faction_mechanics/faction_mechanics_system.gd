@@ -21,6 +21,7 @@ var swarm_synergy: SwarmSynergy = null
 var armor_stacking: ArmorStacking = null
 var evasion_stacking: EvasionStacking = null
 var synchronized_strikes: SynchronizedStrikes = null
+var adaptive_evolution: AdaptiveEvolution = null
 
 ## Unit registrations (unit_id -> faction_id)
 var _unit_factions: Dictionary = {}
@@ -41,6 +42,7 @@ func _init() -> void:
 	armor_stacking = ArmorStacking.new()
 	evasion_stacking = EvasionStacking.new()
 	synchronized_strikes = SynchronizedStrikes.new()
+	adaptive_evolution = AdaptiveEvolution.new()
 
 
 ## Register unit with faction.
@@ -52,6 +54,7 @@ func register_unit(unit_id: int, faction_id: String, base_armor: float = 0.0) ->
 			swarm_synergy.register_unit(unit_id)
 		FACTION_GLACIUS:
 			armor_stacking.register_unit(unit_id, base_armor)
+			adaptive_evolution.register_unit(unit_id)  # OptiForge learns from deaths
 		FACTION_DYNAPODS:
 			evasion_stacking.register_unit(unit_id)
 		FACTION_LOGIBOTS:
@@ -69,10 +72,19 @@ func unregister_unit(unit_id: int) -> void:
 			swarm_synergy.unregister_unit(unit_id)
 		FACTION_GLACIUS:
 			armor_stacking.unregister_unit(unit_id)
+			adaptive_evolution.unregister_unit(unit_id)
 		FACTION_DYNAPODS:
 			evasion_stacking.unregister_unit(unit_id)
 		FACTION_LOGIBOTS:
 			synchronized_strikes.unregister_unit(unit_id)
+
+
+## Record a unit death for adaptive evolution learning.
+## Call this when an OptiForge (glacius) unit is killed.
+func record_death(unit_id: int, attacker_faction: String) -> void:
+	var faction_id: String = _unit_factions.get(unit_id, "")
+	if faction_id == FACTION_GLACIUS:
+		adaptive_evolution.record_death(attacker_faction)
 
 
 ## Update unit position.
@@ -172,17 +184,26 @@ func calculate_outgoing_damage(unit_id: int, base_damage: float) -> float:
 
 
 ## Calculate incoming damage with faction mechanics.
-func calculate_incoming_damage(unit_id: int, incoming_damage: float) -> Dictionary:
+## attacker_faction is optional, used for adaptive evolution learning.
+func calculate_incoming_damage(unit_id: int, incoming_damage: float, attacker_faction: String = "") -> Dictionary:
 	var faction_id: String = _unit_factions.get(unit_id, "")
 	var result: Dictionary = {
 		"damage": incoming_damage,
 		"dodged": false,
-		"distributed": {}
+		"distributed": {},
+		"evolution_reduction": 0.0
 	}
 
 	match faction_id:
 		FACTION_GLACIUS:
-			var armor_result := armor_stacking.process_damage(unit_id, incoming_damage)
+			# Apply adaptive evolution resistance first (learned from past deaths)
+			var evolved_damage := incoming_damage
+			if not attacker_faction.is_empty():
+				evolved_damage = adaptive_evolution.apply_to_incoming_damage(unit_id, attacker_faction, incoming_damage)
+				result["evolution_reduction"] = incoming_damage - evolved_damage
+
+			# Then apply armor stacking
+			var armor_result := armor_stacking.process_damage(unit_id, evolved_damage)
 			result["damage"] = armor_result["primary_damage"]
 			result["distributed"] = armor_result["distributed"]
 
@@ -246,7 +267,8 @@ func to_dict() -> Dictionary:
 		"swarm_synergy": swarm_synergy.to_dict(),
 		"armor_stacking": armor_stacking.to_dict(),
 		"evasion_stacking": evasion_stacking.to_dict(),
-		"synchronized_strikes": synchronized_strikes.to_dict()
+		"synchronized_strikes": synchronized_strikes.to_dict(),
+		"adaptive_evolution": adaptive_evolution.to_dict()
 	}
 
 
@@ -260,6 +282,7 @@ func from_dict(data: Dictionary) -> void:
 	armor_stacking.from_dict(data.get("armor_stacking", {}))
 	evasion_stacking.from_dict(data.get("evasion_stacking", {}))
 	synchronized_strikes.from_dict(data.get("synchronized_strikes", {}))
+	adaptive_evolution.from_dict(data.get("adaptive_evolution", {}))
 
 
 ## Get summary for debugging.
@@ -276,5 +299,6 @@ func get_summary() -> Dictionary:
 		"swarm_synergy": swarm_synergy.get_summary(),
 		"armor_stacking": armor_stacking.get_summary(),
 		"evasion_stacking": evasion_stacking.get_summary(),
-		"synchronized_strikes": synchronized_strikes.get_summary()
+		"synchronized_strikes": synchronized_strikes.get_summary(),
+		"adaptive_evolution": adaptive_evolution.get_summary()
 	}

@@ -380,7 +380,7 @@ func export_for_save() -> Dictionary:
 ## Cleanup old snapshots beyond MAX_SNAPSHOTS
 func _cleanup_old_snapshots() -> void:
 	while _snapshot_order.size() > MAX_SNAPSHOTS:
-		var oldest_id := _snapshot_order.pop_front()
+		var oldest_id: int = _snapshot_order.pop_front()
 		_snapshots.erase(oldest_id)
 		snapshot_cleaned.emit(oldest_id)
 		print("SnapshotManager: Cleaned up snapshot %d" % oldest_id)

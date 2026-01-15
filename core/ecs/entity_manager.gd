@@ -1,4 +1,4 @@
-class_name EntityManager
+class_name EntityManagerBase
 extends RefCounted
 ## EntityManager handles entity lifecycle, pooling, and querying.
 ## Pre-allocates entity pools to avoid runtime allocation.

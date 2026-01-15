@@ -80,7 +80,7 @@ func register_migrator(type_name: String, migrator: Callable) -> void:
 
 ## Update a component's version (triggers migration on load).
 func update_version(type_name: String, new_version: int, new_schema: ComponentSchema = null) -> void:
-	var old_version := _versions.get(type_name, 1)
+	var old_version: int = _versions.get(type_name, 1)
 	_versions[type_name] = new_version
 	if new_schema != null:
 		_schemas[type_name] = new_schema

@@ -144,17 +144,17 @@ func process_damage(target_id: int, incoming_damage: float) -> Dictionary:
 	var nearby: Array = data["nearby_tanks"]
 
 	# Calculate armor reduction
-	var armor := data["effective_armor"]
-	var reduced_damage := incoming_damage * (1.0 - armor)
+	var armor: float = data["effective_armor"]
+	var reduced_damage: float = incoming_damage * (1.0 - armor)
 
 	# If no nearby tanks, primary takes all
 	if nearby.is_empty():
 		return {"primary_damage": reduced_damage, "distributed": {}}
 
 	# Distribute damage
-	var primary_damage := reduced_damage * (1.0 - DAMAGE_DISTRIBUTION)
-	var distributed_total := reduced_damage * DAMAGE_DISTRIBUTION
-	var damage_per_tank := distributed_total / float(nearby.size())
+	var primary_damage: float = reduced_damage * (1.0 - DAMAGE_DISTRIBUTION)
+	var distributed_total: float = reduced_damage * DAMAGE_DISTRIBUTION
+	var damage_per_tank: float = distributed_total / float(nearby.size())
 
 	var distributed: Dictionary = {}
 	var distributed_array: Array[int] = []

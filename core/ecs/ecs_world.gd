@@ -36,8 +36,11 @@ func initialize(pool_size: int = 10000, seed_value: int = 0) -> void:
 		push_warning("ECSWorld: Already initialized")
 		return
 
-	entity_manager = EntityManager.new(pool_size, seed_value)
-	component_registry = ComponentRegistry.new()
+	# Use the autoload singletons (they're already initialized)
+	entity_manager = EntityManager
+	component_registry = ComponentRegistry
+
+	# Create the system manager and other components
 	system_manager = SystemManager.new(entity_manager)
 	entity_validator = EntityValidator.new(entity_manager)
 	reference_tracker = ReferenceTracker.new(entity_manager)
@@ -78,7 +81,7 @@ func _physics_process(delta: float) -> void:
 func _update_stats() -> void:
 	stats = {
 		"entity_count": entity_manager.get_entity_count(),
-		"pool_size": entity_manager.get_pool_size(),
+		"pool_size": entity_manager.get_total_pool_size(),
 		"system_count": system_manager.get_system_count(),
 		"last_query_time_usec": entity_manager.get_last_query_time_usec(),
 		"last_system_time_usec": system_manager.last_total_time_usec
@@ -290,7 +293,7 @@ func generate_id_string(type: EntityTypes.Type, entity: Entity) -> String:
 func debug_print() -> void:
 	print("=== ECSWorld Debug ===")
 	print("Entities: %d" % entity_manager.get_entity_count())
-	print("Pool size: %d" % entity_manager.get_pool_size())
+	print("Pool size: %d" % entity_manager.get_total_pool_size())
 	print("Registered components: %s" % str(component_registry.get_registered_types()))
 	print("Systems: %s" % str(system_manager.get_system_names()))
 	print("Reference stats: %s" % str(reference_tracker.get_stats()))

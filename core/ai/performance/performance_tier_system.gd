@@ -90,7 +90,7 @@ func unregister_unit(unit_id: int) -> void:
 	var tier: int = _unit_tiers[unit_id]["tier"]
 	_unit_tiers.erase(unit_id)
 
-	var idx := _tier_units[tier].find(unit_id)
+	var idx: int = _tier_units[tier].find(unit_id)
 	if idx != -1:
 		_tier_units[tier].remove_at(idx)
 
@@ -124,7 +124,7 @@ func _calculate_tier(unit_id: int) -> int:
 ## Change unit tier.
 func _change_tier(unit_id: int, old_tier: int, new_tier: int) -> void:
 	# Remove from old tier
-	var old_idx := _tier_units[old_tier].find(unit_id)
+	var old_idx: int = _tier_units[old_tier].find(unit_id)
 	if old_idx != -1:
 		_tier_units[old_tier].remove_at(old_idx)
 

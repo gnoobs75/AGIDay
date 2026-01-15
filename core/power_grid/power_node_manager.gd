@@ -102,12 +102,12 @@ func unregister_node(node_id: int) -> void:
 
 	# Remove from faction list
 	if _faction_nodes.has(node.faction_id):
-		var idx := _faction_nodes[node.faction_id].find(node_id)
+		var idx: int = _faction_nodes[node.faction_id].find(node_id)
 		if idx != -1:
 			_faction_nodes[node.faction_id].remove_at(idx)
 
 	# Remove from type list
-	var type_idx := _type_nodes[node.node_type].find(node_id)
+	var type_idx: int = _type_nodes[node.node_type].find(node_id)
 	if type_idx != -1:
 		_type_nodes[node.node_type].remove_at(type_idx)
 

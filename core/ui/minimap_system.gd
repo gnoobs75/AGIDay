@@ -73,7 +73,7 @@ func initialize(parent: Control, faction_id: String = "neutral") -> void:
 
 ## Create UI components.
 func _create_ui(parent: Control) -> void:
-	var faction_color := UITheme.FACTION_COLORS.get(_current_faction, UITheme.FACTION_COLORS["neutral"])
+	var faction_color: Color = UITheme.FACTION_COLORS.get(_current_faction, UITheme.FACTION_COLORS["neutral"])
 
 	# Main container anchored to bottom-right
 	_container = Control.new()

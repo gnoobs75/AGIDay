@@ -1,10 +1,14 @@
 class_name AssemblyProcess
 extends RefCounted
 ## AssemblyProcess tracks an individual unit assembly with animation.
+## Integrates with MeshWelder for final mesh generation.
 
 signal part_animation_started(part_index: int)
 signal part_animation_completed(part_index: int)
 signal assembly_completed()
+signal mesh_weld_started()
+signal mesh_weld_completed(final_mesh: ArrayMesh)
+signal mesh_weld_failed(reason: String)
 signal assembly_cancelled()
 
 ## Process identity
@@ -35,9 +39,16 @@ var active_tweens: Array[Tween] = []
 ## Theme
 var theme: FactionAssemblyTheme = null
 
+## Mesh welding
+var _mesh_welder: MeshWelder = null
+var final_mesh: ArrayMesh = null
+var is_welding: bool = false
+
 
 func _init() -> void:
-	pass
+	_mesh_welder = MeshWelder.new()
+	_mesh_welder.weld_completed.connect(_on_mesh_weld_completed)
+	_mesh_welder.weld_failed.connect(_on_mesh_weld_failed)
 
 
 ## Initialize assembly process.
@@ -64,7 +75,15 @@ func initialize(p_id: int, p_sequence: AssemblySequence, p_faction: String, p_fa
 
 ## Update the assembly process (call each frame).
 func update(delta: float) -> void:
-	if is_complete or is_cancelled:
+	if is_cancelled:
+		return
+
+	# Handle async welding updates
+	if is_welding:
+		update_welding()
+		return
+
+	if is_complete:
 		return
 
 	elapsed_time += delta
@@ -225,17 +244,105 @@ func _on_part_animation_done(part_index: int, tween: Tween) -> void:
 	part_animation_completed.emit(part_index)
 
 
-## Complete the assembly.
+## Complete the assembly - triggers mesh welding.
 func _complete_assembly() -> void:
-	if is_complete:
+	if is_complete or is_welding:
 		return
-
-	is_complete = true
 
 	# Cleanup any remaining tweens
 	_cleanup_tweens()
 
+	# Start mesh welding
+	_weld_assembled_parts()
+
+
+## Weld all assembled parts into final mesh.
+func _weld_assembled_parts() -> void:
+	if assembled_parts.is_empty():
+		_finalize_assembly(null)
+		return
+
+	is_welding = true
+	mesh_weld_started.emit()
+
+	# Determine if async welding needed based on complexity
+	var use_async := assembled_parts.size() > 10 or _estimate_vertex_count() > 5000
+
+	if use_async:
+		weld_mesh_async()
+	else:
+		# Sync welding for simple assemblies
+		var welded := _mesh_welder.weld_parts_sync(assembled_parts, factory_position)
+		_finalize_assembly(welded)
+
+
+## Weld mesh asynchronously (prevents frame hitches).
+func weld_mesh_async() -> void:
+	_mesh_welder.weld_parts_async(process_id, assembled_parts, factory_position)
+
+
+## Complete assembly with welded mesh (call on main thread).
+func complete_assembly(welded_mesh: ArrayMesh = null) -> void:
+	_finalize_assembly(welded_mesh)
+
+
+## Finalize assembly after welding.
+func _finalize_assembly(welded_mesh: ArrayMesh) -> void:
+	is_complete = true
+	is_welding = false
+	final_mesh = welded_mesh
+
+	if final_mesh != null:
+		mesh_weld_completed.emit(final_mesh)
+	else:
+		mesh_weld_failed.emit("No mesh generated")
+
+	# Cleanup intermediate parts
+	_cleanup_assembled_parts()
+
 	assembly_completed.emit()
+
+
+## Cleanup assembled part nodes after welding.
+func _cleanup_assembled_parts() -> void:
+	for part_node in assembled_parts:
+		if is_instance_valid(part_node):
+			part_node.queue_free()
+	assembled_parts.clear()
+
+
+## Estimate vertex count for async decision.
+func _estimate_vertex_count() -> int:
+	var total := 0
+	for part_node in assembled_parts:
+		if part_node is MeshInstance3D and part_node.mesh != null:
+			for i in part_node.mesh.get_surface_count():
+				var arrays: Array = part_node.mesh.surface_get_arrays(i)
+				if arrays.size() > 0 and arrays[Mesh.ARRAY_VERTEX] != null:
+					total += arrays[Mesh.ARRAY_VERTEX].size()
+	return total
+
+
+## Handle mesh weld completed from async.
+func _on_mesh_weld_completed(id: int, mesh: ArrayMesh) -> void:
+	if id != process_id:
+		return
+	_finalize_assembly(mesh)
+
+
+## Handle mesh weld failed from async.
+func _on_mesh_weld_failed(id: int, reason: String) -> void:
+	if id != process_id:
+		return
+	is_welding = false
+	mesh_weld_failed.emit(reason)
+	_finalize_assembly(null)
+
+
+## Update async welding state (call each frame).
+func update_welding() -> void:
+	if is_welding and _mesh_welder != null:
+		_mesh_welder.process_pending_results()
 
 
 ## Cancel and cleanup the assembly.
@@ -244,12 +351,21 @@ func cleanup() -> void:
 
 	_cleanup_tweens()
 
+	# Cancel any pending mesh welding
+	if is_welding and _mesh_welder != null:
+		_mesh_welder.cancel_async_weld(process_id)
+	is_welding = false
+
 	# Remove assembled parts
 	for part_node in assembled_parts:
 		if is_instance_valid(part_node):
 			part_node.queue_free()
 
 	assembled_parts.clear()
+
+	# Cleanup mesh welder
+	if _mesh_welder != null:
+		_mesh_welder.cleanup()
 
 	assembly_cancelled.emit()
 
@@ -317,6 +433,18 @@ func get_summary() -> Dictionary:
 		"current_part": current_part_index,
 		"total_parts": sequence.get_part_count() if sequence != null else 0,
 		"is_complete": is_complete,
+		"is_welding": is_welding,
+		"has_final_mesh": final_mesh != null,
 		"assembled_count": assembled_parts.size(),
 		"active_tweens": active_tweens.size()
 	}
+
+
+## Get the final welded mesh.
+func get_final_mesh() -> ArrayMesh:
+	return final_mesh
+
+
+## Check if assembly is in welding phase.
+func is_in_welding_phase() -> bool:
+	return is_welding

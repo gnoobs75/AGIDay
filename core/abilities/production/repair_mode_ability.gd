@@ -121,7 +121,7 @@ func _find_repair_target(unit_id: int, faction_id: String) -> int:
 			continue
 
 		var health: Dictionary = _get_building_health.call(building_id)
-		var damage := health.get("max", 100.0) - health.get("current", 100.0)
+		var damage: float = health.get("max", 100.0) - health.get("current", 100.0)
 
 		if damage <= 0:
 			continue
@@ -130,7 +130,7 @@ func _find_repair_target(unit_id: int, faction_id: String) -> int:
 		var distance := unit_pos.distance_to(building_pos)
 
 		# Prioritize by damage amount and distance
-		var priority := damage / maxf(1.0, distance)
+		var priority: float = damage / maxf(1.0, distance)
 		if priority > best_damage / maxf(1.0, best_distance):
 			best_target = building_id
 			best_distance = distance

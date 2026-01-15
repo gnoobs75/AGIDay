@@ -95,7 +95,7 @@ func _clean_damage_history(enemy_id: int, current_time: float) -> void:
 func _apply_threat_decay(enemy_id: int, delta: float) -> void:
 	var data: Dictionary = _threat_data[enemy_id]
 	var current_time := Time.get_ticks_msec() / 1000.0
-	var time_since_damage := current_time - data["last_damage_time"]
+	var time_since_damage: float = current_time - data["last_damage_time"]
 
 	if time_since_damage > threat_decay_rate:
 		# Apply exponential decay

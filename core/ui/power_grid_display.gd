@@ -148,7 +148,7 @@ func _update_plant_indicator(plant_id: int) -> void:
 	# Set color based on status
 	match plant["status"]:
 		0:  # Operational
-			var ratio := plant["power_output"] / maxf(plant["max_power"], 1.0)
+			var ratio: float = plant["power_output"] / maxf(plant["max_power"], 1.0)
 			indicator.color = PLANT_OPERATIONAL_COLOR.lerp(PLANT_DAMAGED_COLOR, 1.0 - ratio)
 		1:  # Damaged
 			indicator.color = PLANT_DAMAGED_COLOR

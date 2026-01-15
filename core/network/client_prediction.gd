@@ -200,7 +200,7 @@ func _update_interpolation() -> void:
 		return
 
 	# Calculate interpolation factor
-	var time_range := to_snapshot["time"] - from_snapshot["time"]
+	var time_range: float = to_snapshot["time"] - from_snapshot["time"]
 	var t := 0.0
 	if time_range > 0:
 		t = (_render_time - from_snapshot["time"]) / time_range

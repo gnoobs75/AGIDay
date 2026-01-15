@@ -3,14 +3,14 @@ extends RefCounted
 ## AIComponentSystem manages AI components within the ECS framework.
 ## Bridges AISystem with entity components for unified AI processing.
 
-signal component_added(entity_id: int, component: AIComponent)
+signal component_added(entity_id: int, component: AIComponentData)
 signal component_removed(entity_id: int)
 signal batch_processed(count: int, time_ms: float)
 
 ## Reference to main AI system
 var _ai_system: AISystem = null
 
-## Components (entity_id -> AIComponent)
+## Components (entity_id -> AIComponentData)
 var _components: Dictionary = {}
 
 ## Processing order (prioritized)
@@ -35,8 +35,8 @@ func register_tree_template(tree_name: String, root: LimboAIWrapper.BTNode) -> v
 
 
 ## Add AI component to entity.
-func add_component(entity_id: int, faction_id: String, unit_type: String, tree_name: String) -> AIComponent:
-	var component := AIComponent.new()
+func add_component(entity_id: int, faction_id: String, unit_type: String, tree_name: String) -> AIComponentData:
+	var component := AIComponentData.new()
 	component.initialize(entity_id, faction_id, unit_type, tree_name)
 
 	_components[entity_id] = component
@@ -66,7 +66,7 @@ func remove_component(entity_id: int) -> void:
 
 
 ## Get component.
-func get_component(entity_id: int) -> AIComponent:
+func get_component(entity_id: int) -> AIComponentData:
 	return _components.get(entity_id)
 
 
@@ -92,7 +92,7 @@ func update(delta: float) -> void:
 ## Sync component states from behavior tree results.
 func _sync_component_states() -> void:
 	for entity_id in _components:
-		var component: AIComponent = _components[entity_id]
+		var component: AIComponentData = _components[entity_id]
 
 		# Get latest blackboard values
 		var target_id: Variant = _ai_system.distributed_bt.get_blackboard_value(entity_id, "target_id", -1)
@@ -113,26 +113,26 @@ func _sync_component_states() -> void:
 
 
 ## Update component state based on action.
-func _update_state_from_action(component: AIComponent, action: String) -> void:
+func _update_state_from_action(component: AIComponentData, action: String) -> void:
 	match action:
 		"patrol", "move_to_patrol":
-			component.set_state(AIComponent.State.PATROLLING)
+			component.set_state(AIComponentData.State.PATROLLING)
 		"pursue", "chase", "move_to_target":
-			component.set_state(AIComponent.State.PURSUING)
+			component.set_state(AIComponentData.State.PURSUING)
 		"attack", "engage", "fire":
-			component.set_state(AIComponent.State.ATTACKING)
+			component.set_state(AIComponentData.State.ATTACKING)
 		"flee", "retreat", "escape":
-			component.set_state(AIComponent.State.FLEEING)
+			component.set_state(AIComponentData.State.FLEEING)
 		"support", "heal", "repair":
-			component.set_state(AIComponent.State.SUPPORTING)
+			component.set_state(AIComponentData.State.SUPPORTING)
 		"build", "construct":
-			component.set_state(AIComponent.State.BUILDING)
+			component.set_state(AIComponentData.State.BUILDING)
 		"idle", "wait":
-			component.set_state(AIComponent.State.IDLE)
+			component.set_state(AIComponentData.State.IDLE)
 
 
 ## Sync buffs from hive mind to component.
-func _sync_buffs(component: AIComponent) -> void:
+func _sync_buffs(component: AIComponentData) -> void:
 	for buff_type in HiveMindProgression.BuffType.values():
 		var value := _ai_system.get_unit_buff(component.entity_id, buff_type)
 		if value > 0:
@@ -144,7 +144,7 @@ func update_component_data(entity_id: int, position: Vector3, health_percent: fl
 	if not _components.has(entity_id):
 		return
 
-	var component: AIComponent = _components[entity_id]
+	var component: AIComponentData = _components[entity_id]
 
 	_ai_system.update_unit_data_batch(entity_id, {
 		"position": position,
@@ -163,7 +163,7 @@ func set_perception(entity_id: int, detection_range: float, attack_range: float,
 	if not _components.has(entity_id):
 		return
 
-	var component: AIComponent = _components[entity_id]
+	var component: AIComponentData = _components[entity_id]
 	component.detection_range = detection_range
 	component.attack_range = attack_range
 	component.aggression = aggression
@@ -227,7 +227,7 @@ func from_dict(data: Dictionary) -> void:
 
 	for entity_id_str in components_data:
 		var entity_id := int(entity_id_str)
-		var component := AIComponent.new()
+		var component := AIComponentData.new()
 		component.from_dict(components_data[entity_id_str])
 		_components[entity_id] = component
 
@@ -239,13 +239,13 @@ func from_dict(data: Dictionary) -> void:
 ## Get summary for debugging.
 func get_summary() -> Dictionary:
 	var state_counts: Dictionary = {}
-	for state in AIComponent.State.values():
-		state_counts[AIComponent.STATE_NAMES[state]] = 0
+	for state in AIComponentData.State.values():
+		state_counts[AIComponentData.STATE_NAMES[state]] = 0
 
 	var faction_counts: Dictionary = {}
 
 	for entity_id in _components:
-		var component: AIComponent = _components[entity_id]
+		var component: AIComponentData = _components[entity_id]
 		state_counts[component.get_state_name()] += 1
 		faction_counts[component.faction_id] = faction_counts.get(component.faction_id, 0) + 1
 

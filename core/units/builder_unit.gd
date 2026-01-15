@@ -158,7 +158,7 @@ func complete_repair() -> void:
 
 	# Check repair queue for multi-target builders
 	if not repair_queue.is_empty():
-		var next_target := repair_queue.pop_front()
+		var next_target: int = repair_queue.pop_front()
 		set_repair_target(next_target, 1.0)  # Damage amount would be fetched
 
 

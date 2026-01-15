@@ -70,13 +70,13 @@ static func from_dict(data: Dictionary) -> FactionConfig:
 	config.description = data.get("description", "")
 
 	# Parse colors
-	var primary := data.get("primary_color", "#FFFFFF")
+	var primary: Variant = data.get("primary_color", "#FFFFFF")
 	if primary is String:
 		config.primary_color = Color.html(primary)
 	elif primary is Dictionary:
 		config.primary_color = Color(primary.get("r", 1), primary.get("g", 1), primary.get("b", 1))
 
-	var secondary := data.get("secondary_color", "#808080")
+	var secondary: Variant = data.get("secondary_color", "#808080")
 	if secondary is String:
 		config.secondary_color = Color.html(secondary)
 	elif secondary is Dictionary:

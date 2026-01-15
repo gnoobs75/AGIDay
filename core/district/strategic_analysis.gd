@@ -109,7 +109,7 @@ func _measure_passage_width(position: Vector3, direction: Vector3, blocked: Dict
 	# Measure in both perpendicular directions
 	for sign_val in [-1, 1]:
 		for dist in range(1, 20):
-			var check_pos := position + perpendicular * dist * sign_val
+			var check_pos: Vector3 = position + perpendicular * dist * sign_val
 			var key := "%d,%d" % [int(check_pos.x), int(check_pos.z)]
 
 			if blocked.has(key):

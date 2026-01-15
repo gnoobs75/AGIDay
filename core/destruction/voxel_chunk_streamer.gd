@@ -198,7 +198,7 @@ func _is_chunk_in_frustum(center: Vector3, size: float) -> bool:
 
 	for plane in _frustum_planes:
 		if plane is Plane:
-			var distance := plane.distance_to(center)
+			var distance: float = plane.distance_to(center)
 			if distance < -radius:
 				return false
 

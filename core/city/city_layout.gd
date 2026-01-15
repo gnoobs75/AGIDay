@@ -294,7 +294,7 @@ func get_summary() -> Dictionary:
 	var zone_counts: Dictionary = {}
 	for row in zones:
 		for zone in row:
-			var type_name := zone.get_type_name()
+			var type_name: String = zone.get_type_name()
 			zone_counts[type_name] = zone_counts.get(type_name, 0) + 1
 
 	return {

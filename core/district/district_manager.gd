@@ -1,6 +1,6 @@
-class_name DistrictManager
+class_name DistrictZoneManager
 extends RefCounted
-## DistrictManager handles all district control and resource generation.
+## DistrictZoneManager handles all district control and resource generation.
 
 signal district_created(district_id: int)
 signal district_captured(district_id: int, old_faction: String, new_faction: String)
@@ -44,8 +44,8 @@ func set_city_bounds(min_bounds: Vector3i, max_bounds: Vector3i) -> void:
 
 
 ## Create district.
-func create_district(name: String, district_type: int, min_bounds: Vector3i, max_bounds: Vector3i, faction_id: String = "") -> District:
-	var district := District.new()
+func create_district(name: String, district_type: int, min_bounds: Vector3i, max_bounds: Vector3i, faction_id: String = "") -> DistrictZone:
+	var district := DistrictZone.new()
 	district.initialize(_next_district_id, name, district_type, min_bounds, max_bounds)
 
 	if not faction_id.is_empty():
@@ -70,8 +70,8 @@ func create_district(name: String, district_type: int, min_bounds: Vector3i, max
 
 
 ## Create corner district with power plant.
-func create_corner_district(name: String, corner: int, faction_id: String = "") -> District:
-	var district_size := District.DISTRICT_SIZE
+func create_corner_district(name: String, corner: int, faction_id: String = "") -> DistrictZone:
+	var district_size := DistrictZone.DISTRICT_SIZE
 	var min_bounds: Vector3i
 	var max_bounds: Vector3i
 
@@ -89,19 +89,19 @@ func create_corner_district(name: String, corner: int, faction_id: String = "") 
 			min_bounds = Vector3i(_city_max.x - district_size, _city_min.y, _city_max.z - district_size)
 			max_bounds = _city_max
 
-	var district := create_district(name, District.DistrictType.CORNER, min_bounds, max_bounds, faction_id)
+	var district := create_district(name, DistrictZone.DistrictType.CORNER, min_bounds, max_bounds, faction_id)
 	district.power_generation_rate = CORNER_POWER_OUTPUT
 
 	return district
 
 
 ## Create edge district with resource node.
-func create_edge_district(name: String, edge_position: Vector3i, faction_id: String = "") -> District:
-	var district_size := District.DISTRICT_SIZE
+func create_edge_district(name: String, edge_position: Vector3i, faction_id: String = "") -> DistrictZone:
+	var district_size := DistrictZone.DISTRICT_SIZE
 	var min_bounds := edge_position
 	var max_bounds := edge_position + Vector3i(district_size, 64, district_size)
 
-	var district := create_district(name, District.DistrictType.EDGE, min_bounds, max_bounds, faction_id)
+	var district := create_district(name, DistrictZone.DistrictType.EDGE, min_bounds, max_bounds, faction_id)
 
 	# Create REE resource node
 	var node_pos := Vector3(district.center_position.x, 0.0, district.center_position.z)
@@ -149,7 +149,7 @@ func create_power_node(district_id: int, position: Vector3, rate: float = 50.0, 
 
 
 ## Get district by ID.
-func get_district(district_id: int) -> District:
+func get_district(district_id: int) -> DistrictZone:
 	return _districts.get(district_id)
 
 
@@ -159,23 +159,23 @@ func get_resource_node(node_id: int) -> ResourceNode:
 
 
 ## Get district at position.
-func get_district_at_position(position: Vector3) -> District:
+func get_district_at_position(position: Vector3) -> DistrictZone:
 	for district_id in _districts:
-		var district: District = _districts[district_id]
+		var district: DistrictZone = _districts[district_id]
 		if district.contains_position(position):
 			return district
 	return null
 
 
 ## Get districts for faction.
-func get_faction_districts(faction_id: String) -> Array[District]:
-	var districts: Array[District] = []
+func get_faction_districts(faction_id: String) -> Array[DistrictZone]:
+	var districts: Array[DistrictZone] = []
 
 	if not _faction_districts.has(faction_id):
 		return districts
 
 	for district_id in _faction_districts[faction_id]:
-		var district: District = _districts.get(district_id)
+		var district: DistrictZone = _districts.get(district_id)
 		if district != null:
 			districts.append(district)
 
@@ -203,11 +203,11 @@ func capture_district(district_id: int, capturing_faction: String) -> void:
 	if district == null:
 		return
 
-	var old_faction := district.owning_faction
+	var old_faction: String = district.owning_faction
 
 	# Remove from old faction list
 	if _faction_districts.has(old_faction):
-		var idx := _faction_districts[old_faction].find(district_id)
+		var idx: int = _faction_districts[old_faction].find(district_id)
 		if idx != -1:
 			_faction_districts[old_faction].remove_at(idx)
 
@@ -239,10 +239,10 @@ func distribute_power(faction_id: String, available_power: float) -> void:
 	var unpowered := 0
 
 	for district in districts:
-		var ratio := district.power_consumption / total_demand if total_demand > 0 else 0.0
-		var allocated := available_power * ratio
+		var ratio: float = district.power_consumption / total_demand if total_demand > 0 else 0.0
+		var allocated: float = available_power * ratio
 
-		var has_enough := allocated >= district.power_consumption * 0.5
+		var has_enough: bool = allocated >= district.power_consumption * 0.5
 		district.set_power_state(has_enough, allocated)
 
 		if has_enough:
@@ -258,23 +258,23 @@ func generate_income(delta: float) -> Dictionary:
 	var faction_income: Dictionary = {}
 
 	for district_id in _districts:
-		var district: District = _districts[district_id]
+		var district: DistrictZone = _districts[district_id]
 		if district.owning_faction.is_empty():
 			continue
 
-		var faction := district.owning_faction
+		var faction: String = district.owning_faction
 		if not faction_income.has(faction):
 			faction_income[faction] = {"ree": 0.0, "power": 0.0}
 
 		# Generate from district
-		var multiplier := district.get_income_multiplier()
-		var district_income := district.generate_income(delta)
+		var multiplier: float = district.get_income_multiplier()
+		var district_income: Dictionary = district.generate_income(delta)
 		faction_income[faction]["ree"] += district_income["ree"] * multiplier
 		faction_income[faction]["power"] += district_income["power"] * multiplier
 
 		# Generate from resource nodes
 		for node in get_district_resource_nodes(district_id):
-			var amount := node.generate(delta) * multiplier
+			var amount: float = node.generate(delta) * multiplier
 			if node.resource_type == ResourceNode.ResourceType.REE:
 				faction_income[faction]["ree"] += amount
 			else:
@@ -308,7 +308,7 @@ func get_faction_income_rate(faction_id: String) -> Dictionary:
 	var total := {"ree": 0.0, "power": 0.0}
 
 	for district in get_faction_districts(faction_id):
-		var multiplier := district.get_income_multiplier()
+		var multiplier: float = district.get_income_multiplier()
 		total["ree"] += district.ree_generation_rate * multiplier
 		total["power"] += district.power_generation_rate * multiplier
 
@@ -326,7 +326,7 @@ func get_faction_income_rate(faction_id: String) -> Dictionary:
 func _on_ownership_changed(district_id: int, old_faction: String, new_faction: String) -> void:
 	# Update faction maps
 	if _faction_districts.has(old_faction):
-		var idx := _faction_districts[old_faction].find(district_id)
+		var idx: int = _faction_districts[old_faction].find(district_id)
 		if idx != -1:
 			_faction_districts[old_faction].remove_at(idx)
 
@@ -381,7 +381,7 @@ func from_dict(data: Dictionary) -> void:
 	# Load districts
 	var districts_data: Dictionary = data.get("districts", {})
 	for district_id_str in districts_data:
-		var district := District.new()
+		var district := DistrictZone.new()
 		district.from_dict(districts_data[district_id_str])
 		_districts[int(district_id_str)] = district
 
@@ -410,11 +410,11 @@ func from_dict(data: Dictionary) -> void:
 ## Get summary for debugging.
 func get_summary() -> Dictionary:
 	var type_counts: Dictionary = {}
-	for t in District.DistrictType.values():
+	for t in DistrictZone.DistrictType.values():
 		type_counts[t] = 0
 
 	for district_id in _districts:
-		var district: District = _districts[district_id]
+		var district: DistrictZone = _districts[district_id]
 		type_counts[district.district_type] += 1
 
 	return {

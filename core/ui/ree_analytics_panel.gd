@@ -343,7 +343,7 @@ func _update_source_display() -> void:
 	for source in SOURCE_TYPES:
 		if _source_bars.has(source):
 			var bar: ProgressBar = _source_bars[source]
-			var percent := (_source_breakdown[source] / maxf(total, 1.0)) * 100.0
+			var percent: float = (_source_breakdown[source] / maxf(total, 1.0)) * 100.0
 			bar.value = percent
 
 			# Update value label

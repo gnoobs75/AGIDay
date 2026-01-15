@@ -7,7 +7,7 @@ signal collision_detected(result: CollisionResult)
 signal damage_applied(unit_id: int, damage: float, attacker_faction: String)
 
 ## Spatial grid for units
-var _unit_grid: SpatialGrid = null
+var _unit_grid: ProjectileSpatialGrid = null
 
 ## Unit collision radii (unit_id -> radius)
 var _unit_radii: Dictionary = {}
@@ -27,7 +27,7 @@ const GRID_CELL_SIZE := 32.0
 
 
 func _init() -> void:
-	_unit_grid = SpatialGrid.new(GRID_CELL_SIZE)
+	_unit_grid = ProjectileSpatialGrid.new(GRID_CELL_SIZE)
 
 
 ## Register unit for collision detection.

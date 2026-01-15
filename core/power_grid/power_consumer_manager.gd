@@ -110,19 +110,19 @@ func unregister_consumer(consumer_id: int) -> void:
 
 	# Remove from faction list
 	if _faction_consumers.has(faction_id):
-		var idx := _faction_consumers[faction_id].find(consumer_id)
+		var idx: int = _faction_consumers[faction_id].find(consumer_id)
 		if idx != -1:
 			_faction_consumers[faction_id].remove_at(idx)
 
 	# Remove from type list
 	var type_list: Array = _type_consumers[consumer.consumer_type]
-	var type_idx := type_list.find(consumer_id)
+	var type_idx: int = type_list.find(consumer_id)
 	if type_idx != -1:
 		type_list.remove_at(type_idx)
 
 	# Remove from district list
 	if consumer.district_id >= 0 and _district_consumers.has(consumer.district_id):
-		var district_idx := _district_consumers[consumer.district_id].find(consumer_id)
+		var district_idx: int = _district_consumers[consumer.district_id].find(consumer_id)
 		if district_idx != -1:
 			_district_consumers[consumer.district_id].remove_at(district_idx)
 
@@ -199,11 +199,11 @@ func update_from_power_grid() -> void:
 
 		if consumer.district_id >= 0:
 			is_blackout = _power_api.is_district_in_blackout(consumer.district_id)
-			var district_info := _power_api.get_district_info(consumer.district_id)
+			var district_info: Dictionary = _power_api.get_district_info(consumer.district_id)
 			available_power = district_info.get("power", 0.0)
 		else:
 			# Not in a district - check faction-level blackout
-			var faction_status := _power_api.get_faction_power_status(consumer.faction_id)
+			var faction_status: Dictionary = _power_api.get_faction_power_status(consumer.faction_id)
 			is_blackout = faction_status.get("has_deficit", false)
 			available_power = faction_status.get("generation", 0.0)
 

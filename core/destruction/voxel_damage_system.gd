@@ -169,8 +169,8 @@ func _apply_damage(event: Dictionary) -> void:
 	voxel_damaged.emit(position, effective_damage, new_health)
 
 	# Check stage transition
-	var health_percent := new_health / data["max_health"]
-	var new_stage := VoxelStage.get_stage_from_health(health_percent)
+	var health_percent: float = new_health / data["max_health"]
+	var new_stage: int = VoxelStage.get_stage_from_health(health_percent)
 
 	if new_stage != current_stage:
 		_handle_stage_transition(position, data, current_stage, new_stage, attacker)

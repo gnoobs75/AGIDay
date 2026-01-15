@@ -99,7 +99,7 @@ func _on_button_hover_end(button: Button) -> void:
 
 	_cancel_tweens(control_id)
 
-	var original := _registered_controls[control_id]
+	var original: Dictionary = _registered_controls[control_id]
 	var transition := PERF_TRANSITION if _performance_mode else BUTTON_TRANSITION
 
 	if transition > 0:
@@ -153,8 +153,8 @@ func _on_button_released(button: Button) -> void:
 	_cancel_tweens(control_id)
 
 	# Return to hover state if still hovering, otherwise to original
-	var target_scale := Vector2(HOVER_SCALE, HOVER_SCALE) if button.is_hovered() else _registered_controls[control_id]["original_scale"]
-	var target_modulate := Color(1.0 + HOVER_GLOW_INTENSITY, 1.0 + HOVER_GLOW_INTENSITY, 1.0 + HOVER_GLOW_INTENSITY) if button.is_hovered() else _registered_controls[control_id]["original_modulate"]
+	var target_scale: Vector2 = Vector2(HOVER_SCALE, HOVER_SCALE) if button.is_hovered() else _registered_controls[control_id]["original_scale"]
+	var target_modulate: Color = Color(1.0 + HOVER_GLOW_INTENSITY, 1.0 + HOVER_GLOW_INTENSITY, 1.0 + HOVER_GLOW_INTENSITY) if button.is_hovered() else _registered_controls[control_id]["original_modulate"]
 
 	var transition := PERF_TRANSITION if _performance_mode else BUTTON_TRANSITION
 

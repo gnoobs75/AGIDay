@@ -1,4 +1,4 @@
-class_name ComponentRegistry
+class_name ComponentRegistryBase
 extends RefCounted
 ## ComponentRegistry manages component type registration, schema validation, and factory creation.
 ## Used for deserializing entities with their components from save files.

@@ -197,7 +197,7 @@ func _update_display() -> void:
 			_owner_label.add_theme_color_override("font_color", Color.GRAY)
 		else:
 			_owner_label.text = _format_faction_name(owner)
-			var faction_color := UITheme.FACTION_COLORS.get(owner, Color.WHITE)
+			var faction_color: Color = UITheme.FACTION_COLORS.get(owner, Color.WHITE)
 			_owner_label.add_theme_color_override("font_color", faction_color)
 
 	# Type

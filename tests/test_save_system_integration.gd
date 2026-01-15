@@ -131,7 +131,8 @@ func test_save_modify_save_cycle() -> bool:
 
 	# Load and verify modifications
 	var load2 := SaveManager.load_game(save_name)
-	var has_new_entity := load2.snapshot.get("entities", {}).has("new_entity_999")
+	var load2_snapshot: Dictionary = load2.get("snapshot", {}) if load2 is Dictionary else {}
+	var has_new_entity := load2_snapshot.get("entities", {}).has("new_entity_999")
 
 	# Cleanup
 	SaveManager.delete_save_with_backups(save_name)
@@ -156,8 +157,10 @@ func test_snapshot_delta_integration() -> bool:
 	var export_data := SnapshotManager.export_for_save()
 
 	# Verify export has snapshot and deltas
-	var has_snapshot := not export_data.get("snapshot", {}).is_empty()
-	var has_deltas := not export_data.get("deltas", []).is_empty()
+	var snapshot_data: Dictionary = export_data.get("snapshot", {})
+	var deltas_data: Array = export_data.get("deltas", [])
+	var has_snapshot := not snapshot_data.is_empty()
+	var has_deltas := not deltas_data.is_empty()
 
 	SnapshotManager.stop_tracking()
 	SnapshotManager.clear()
@@ -415,8 +418,8 @@ func test_checksum_validation() -> bool:
 	SaveManager.save_game(save_name, game_state)
 
 	# Verify save is valid
-	var validation := SaveManager.validate_save(save_name)
-	var is_valid := validation.get("valid", false)
+	var validation: Dictionary = SaveManager.validate_save(save_name)
+	var is_valid: bool = validation.get("valid", false)
 
 	# Cleanup
 	SaveManager.delete_save_with_backups(save_name)
@@ -441,7 +444,8 @@ func test_large_entity_count() -> bool:
 	var load_result := SaveManager.load_game(save_name)
 
 	# Verify count
-	var loaded_count := load_result.snapshot.get("entities", {}).size()
+	var load_result_snapshot: Dictionary = load_result.get("snapshot", {}) if load_result is Dictionary else {}
+	var loaded_count := load_result_snapshot.get("entities", {}).size()
 	print("  Large entity test: Saved %d, Loaded %d" % [10000, loaded_count])
 
 	# Cleanup

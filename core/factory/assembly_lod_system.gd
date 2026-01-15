@@ -250,7 +250,7 @@ func get_summary() -> Dictionary:
 	}
 
 	for assembly_id in _assembly_lod:
-		var lod := _assembly_lod[assembly_id].current_lod
+		var lod: int = _assembly_lod[assembly_id].current_lod
 		match lod:
 			LOD_FULL:
 				lod_counts["full"] += 1

@@ -146,7 +146,7 @@ func _draw_capture_progress(node: Control, progress: Dictionary, rect: Rect2) ->
 	for faction in progress:
 		var faction_progress: float = progress[faction]
 		var width := (faction_progress / 100.0) * bar_width
-		var color := UITheme.FACTION_COLORS.get(faction, Color.GRAY)
+		var color: Color = UITheme.FACTION_COLORS.get(faction, Color.GRAY)
 		node.draw_rect(Rect2(x, y, width, bar_height), color)
 		x += width
 

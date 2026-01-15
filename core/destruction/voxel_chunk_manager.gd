@@ -50,7 +50,7 @@ func _initialize_chunks() -> void:
 
 
 ## Get voxel at world position.
-func get_voxel(world_pos: Vector3i) -> VoxelState:
+func get_voxel(world_pos: Vector3i) -> VoxelStateData:
 	var chunk := _get_chunk_for_world_pos(world_pos)
 	if chunk == null:
 		return null
@@ -60,7 +60,7 @@ func get_voxel(world_pos: Vector3i) -> VoxelState:
 
 
 ## Set voxel at world position.
-func set_voxel(world_pos: Vector3i, voxel: VoxelState) -> void:
+func set_voxel(world_pos: Vector3i, voxel: VoxelStateData) -> void:
 	var chunk := _get_chunk_for_world_pos(world_pos)
 	if chunk == null:
 		return
@@ -177,16 +177,16 @@ func _world_to_local(world_pos: Vector3i) -> Vector2i:
 
 
 ## Get all damaged voxels across all chunks.
-func get_all_damaged_voxels() -> Array[VoxelState]:
-	var result: Array[VoxelState] = []
+func get_all_damaged_voxels() -> Array[VoxelStateData]:
+	var result: Array[VoxelStateData] = []
 	for chunk in _chunks:
 		result.append_array(chunk.get_damaged_voxels())
 	return result
 
 
 ## Get all damaged voxels in radius.
-func get_damaged_voxels_in_radius(center: Vector3i, radius: int) -> Array[VoxelState]:
-	var result: Array[VoxelState] = []
+func get_damaged_voxels_in_radius(center: Vector3i, radius: int) -> Array[VoxelStateData]:
+	var result: Array[VoxelStateData] = []
 	var radius_sq := radius * radius
 
 	# Determine which chunks to check
@@ -208,8 +208,8 @@ func get_damaged_voxels_in_radius(center: Vector3i, radius: int) -> Array[VoxelS
 
 
 ## Get all power nodes across all chunks.
-func get_all_power_nodes() -> Array[VoxelState]:
-	var result: Array[VoxelState] = []
+func get_all_power_nodes() -> Array[VoxelStateData]:
+	var result: Array[VoxelStateData] = []
 	for chunk in _chunks:
 		result.append_array(chunk.get_power_nodes())
 	return result
@@ -226,13 +226,13 @@ func register_special_node(world_pos: Vector3i, node_type: String) -> void:
 	if voxel != null:
 		match node_type:
 			"power_node":
-				voxel.set_flag(VoxelState.FLAG_POWER_NODE, true)
+				voxel.set_flag(VoxelStateData.FLAG_POWER_NODE, true)
 			"power_hub":
-				voxel.set_flag(VoxelState.FLAG_POWER_HUB, true)
+				voxel.set_flag(VoxelStateData.FLAG_POWER_HUB, true)
 			"resource":
-				voxel.set_flag(VoxelState.FLAG_RESOURCE, true)
+				voxel.set_flag(VoxelStateData.FLAG_RESOURCE, true)
 			"strategic":
-				voxel.set_flag(VoxelState.FLAG_STRATEGIC, true)
+				voxel.set_flag(VoxelStateData.FLAG_STRATEGIC, true)
 
 
 ## Get special nodes of type.

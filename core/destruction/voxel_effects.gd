@@ -373,7 +373,7 @@ func process(delta: float) -> void:
 
 ## Spawn dust cloud at position.
 func spawn_dust_cloud(position: Vector3, scale: float = 1.0) -> void:
-	var config := _effect_configs[EffectType.DUST_CLOUD].duplicate()
+	var config: Dictionary = _effect_configs[EffectType.DUST_CLOUD].duplicate()
 	config["scale"] *= scale
 	config["particle_amount"] = int(config["particle_amount"] * scale)
 	_spawn_particles(position, config)

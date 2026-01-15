@@ -368,7 +368,7 @@ func is_online() -> bool:
 	return _mode == NetworkMode.ONLINE_SERVER or _mode == NetworkMode.ONLINE_CLIENT
 
 
-func is_connected() -> bool:
+func is_network_connected() -> bool:
 	return _state == ConnectionState.CONNECTED or _state == ConnectionState.READY
 
 

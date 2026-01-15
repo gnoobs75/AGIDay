@@ -415,7 +415,8 @@ func test_backup_restoration() -> bool:
 
 	# Load and verify
 	var loaded := SaveManager.load_game("test_backup_restore")
-	var has_original := loaded.snapshot.get("entities", {}).has("unique_entity")
+	var loaded_snapshot: Dictionary = loaded.get("snapshot", {}) if loaded is Dictionary else {}
+	var has_original := loaded_snapshot.get("entities", {}).has("unique_entity")
 
 	# Cleanup
 	SaveManager.delete_save("test_backup_restore")

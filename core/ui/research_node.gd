@@ -18,7 +18,7 @@ enum TechState {
 }
 
 ## State colors
-const STATE_COLORS := {
+static var STATE_COLORS := {
 	TechState.LOCKED: Color.RED.darkened(0.3),
 	TechState.AVAILABLE: Color.YELLOW,
 	TechState.RESEARCHING: Color.CYAN,

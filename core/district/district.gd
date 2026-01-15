@@ -1,6 +1,6 @@
-class_name District
+class_name DistrictZone
 extends RefCounted
-## District represents a territorial control zone in the city.
+## DistrictZone represents a territorial control zone in the city.
 
 signal ownership_changed(district_id: int, old_faction: String, new_faction: String)
 signal district_captured(district_id: int, capturing_faction: String)
