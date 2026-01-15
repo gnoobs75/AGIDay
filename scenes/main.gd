@@ -1862,6 +1862,7 @@ func _create_unit_character_card(unit_type: String) -> Control:
 	viewport.size = Vector2i(240, 180)
 	viewport.transparent_bg = true
 	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	viewport.own_world_3d = true  # CRITICAL: Each viewport needs its own 3D world!
 	viewport_container.add_child(viewport)
 
 	# Store viewport reference for rotation updates
@@ -1871,9 +1872,10 @@ func _create_unit_character_card(unit_type: String) -> Control:
 	var cam := Camera3D.new()
 	cam.name = "Camera"
 	cam.position = Vector3(0, 2, 6)
-	cam.look_at(Vector3(0, 1, 0), Vector3.UP)
 	cam.fov = 40
 	viewport.add_child(cam)
+	# look_at must be called AFTER node is in tree
+	cam.look_at(Vector3(0, 1, 0), Vector3.UP)
 
 	# Add lighting
 	var light := DirectionalLight3D.new()
@@ -1888,7 +1890,7 @@ func _create_unit_character_card(unit_type: String) -> Control:
 
 	# Model container (will be populated with actual model)
 	var model_container := Node3D.new()
-	model_container.name = "ModelContainer"
+	model_container.name = "ModelContainer_" + unit_type
 	viewport.add_child(model_container)
 	_faction_info_models.append(model_container)
 
@@ -2049,24 +2051,17 @@ func _update_unit_model(index: int, unit_type: String, faction_color: Color) -> 
 	if model_container == null:
 		return
 
-	# Clear existing model
+	# Clear existing model - use free() instead of queue_free() for immediate removal
 	for child in model_container.get_children():
-		child.queue_free()
+		model_container.remove_child(child)
+		child.free()
 
-	# Map display unit types to internal types
-	var internal_type := unit_type
-	match unit_type:
-		"scout": internal_type = "scout"
-		"soldier": internal_type = "soldier"
-		"tank": internal_type = "tank"
-		"harvester": internal_type = "harvester"
-
-	# Get type data
-	var type_data: Dictionary = UNIT_TYPES.get(internal_type, UNIT_TYPES["soldier"])
+	# Get type data directly - unit_type is already correct from card metadata
+	var type_data: Dictionary = UNIT_TYPES.get(unit_type, UNIT_TYPES["soldier"])
 
 	# Create the procedural bot model
-	var bot := _create_procedural_bot(_player_faction, internal_type, type_data)
-	bot.position = Vector3(0, 0, 0)
+	var bot := _create_procedural_bot(_player_faction, unit_type, type_data)
+	bot.position = Vector3(0, type_data.get("size", Vector3.ONE).y * 0.5, 0)  # Center vertically
 	bot.scale = Vector3.ONE * 1.2  # Slightly larger for visibility
 	model_container.add_child(bot)
 
@@ -8849,24 +8844,21 @@ func _update_blink_effects() -> void:
 
 
 ## Create a procedural bot mesh based on faction and unit type.
-func _create_procedural_bot(faction_id: int, unit_type: String, type_data: Dictionary) -> CSGCombiner3D:
-	var root := CSGCombiner3D.new()
-	root.name = "Bot_%d" % faction_id
+## Using Node3D instead of CSGCombiner3D - CSG children render fine without boolean combining
+func _create_procedural_bot(faction_id: int, unit_type: String, type_data: Dictionary) -> Node3D:
+	var root := Node3D.new()
+	root.name = "Bot_%d_%s" % [faction_id, unit_type]
 
-	var base_size: Vector3 = type_data.size
+	var base_size: Vector3 = type_data.get("size", Vector3(1.5, 2.0, 1.5))
 	var faction_color: Color = FACTION_COLORS.get(faction_id, Color.WHITE)
 
 	# Create base material
 	var base_mat := StandardMaterial3D.new()
 	base_mat.emission_enabled = true
 
-	# Special case for harvesters
+	# Special case for harvesters - faction-specific collector designs
 	if unit_type == "harvester":
-		faction_color = Color(0.9, 0.75, 0.2)
-		base_mat.albedo_color = faction_color
-		base_mat.emission = Color(1.0, 0.8, 0.2) * 0.5
-		base_mat.metallic = 0.7
-		_add_harvester_parts(root, base_size, base_mat)
+		_add_harvester_parts(root, base_size, base_mat, faction_id, faction_color)
 		return root
 
 	base_mat.albedo_color = faction_color
@@ -8882,6 +8874,8 @@ func _create_procedural_bot(faction_id: int, unit_type: String, type_data: Dicti
 			_add_dynapods_parts(root, base_size, base_mat, unit_type)
 		4:  # LogiBots Colossus - heavy, tank-like
 			_add_logibots_parts(root, base_size, base_mat, unit_type)
+		5:  # Human Remnant - military vehicles and infantry
+			_add_human_remnant_parts(root, base_size, base_mat, unit_type)
 		_:  # Default simple bot
 			var body := CSGBox3D.new()
 			body.size = base_size
@@ -8893,7 +8887,7 @@ func _create_procedural_bot(faction_id: int, unit_type: String, type_data: Dicti
 
 ## Add Aether Swarm visual parts - sleek stealth drones with phase tech.
 ## Faction theme: Translucent, angular, ethereal, glowing cores
-func _add_aether_swarm_parts(root: CSGCombiner3D, base_size: Vector3, mat: StandardMaterial3D, unit_type: String) -> void:
+func _add_aether_swarm_parts(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, unit_type: String) -> void:
 	# Glowing core material (shared)
 	var core_mat := StandardMaterial3D.new()
 	core_mat.albedo_color = Color(0.6, 0.95, 1.0)
@@ -9044,10 +9038,22 @@ func _add_aether_swarm_parts(root: CSGCombiner3D, base_size: Vector3, mat: Stand
 				fin.material = panel_mat
 				root.add_child(fin)
 
+		_:
+			# Default fallback - bright magenta cube (indicates unhandled unit type)
+			var error_mat := StandardMaterial3D.new()
+			error_mat.albedo_color = Color(1.0, 0.0, 1.0)  # Bright magenta
+			error_mat.emission_enabled = true
+			error_mat.emission = Color(1.0, 0.0, 1.0)
+			error_mat.emission_energy_multiplier = 2.0
+			var cube := CSGBox3D.new()
+			cube.size = base_size
+			cube.material = error_mat
+			root.add_child(cube)
+
 
 ## Add OptiForge Legion visual parts - humanoid industrial bots.
 ## Faction theme: Humanoid, industrial, glowing red visors, mass-produced look
-func _add_optiforge_parts(root: CSGCombiner3D, base_size: Vector3, mat: StandardMaterial3D, unit_type: String) -> void:
+func _add_optiforge_parts(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, unit_type: String) -> void:
 	# Shared visor material (glowing red)
 	var visor_mat := StandardMaterial3D.new()
 	visor_mat.albedo_color = Color(1.0, 0.2, 0.1)
@@ -9255,7 +9261,7 @@ func _add_optiforge_parts(root: CSGCombiner3D, base_size: Vector3, mat: Standard
 
 ## Add Dynapods Vanguard visual parts - agile, multi-limbed acrobatic bots.
 ## Faction theme: Spider/crab-like, organic curves, green glowing eyes, blade arms
-func _add_dynapods_parts(root: CSGCombiner3D, base_size: Vector3, mat: StandardMaterial3D, unit_type: String) -> void:
+func _add_dynapods_parts(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, unit_type: String) -> void:
 	# Glowing eye material
 	var eye_mat := StandardMaterial3D.new()
 	eye_mat.albedo_color = Color(0.3, 1.0, 0.4)
@@ -9465,7 +9471,7 @@ func _add_dynapods_parts(root: CSGCombiner3D, base_size: Vector3, mat: StandardM
 
 ## Add LogiBots Colossus visual parts - heavy, tank-like siege units.
 ## Faction theme: Industrial tanks, tracked vehicles, yellow sensor arrays, massive guns
-func _add_logibots_parts(root: CSGCombiner3D, base_size: Vector3, mat: StandardMaterial3D, unit_type: String) -> void:
+func _add_logibots_parts(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, unit_type: String) -> void:
 	# Sensor/light material (glowing yellow)
 	var sensor_mat := StandardMaterial3D.new()
 	sensor_mat.albedo_color = Color(0.95, 0.9, 0.3)
@@ -9713,26 +9719,828 @@ func _add_logibots_parts(root: CSGCombiner3D, base_size: Vector3, mat: StandardM
 				root.add_child(side_armor)
 
 
-## Add harvester visual parts - collector bot with scoop.
-func _add_harvester_parts(root: CSGCombiner3D, base_size: Vector3, mat: StandardMaterial3D) -> void:
-	# Main body
+## Add Human Remnant visual parts - military vehicles and infantry.
+## Faction theme: Olive drab, conventional military hardware, rugged, practical
+func _add_human_remnant_parts(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, unit_type: String) -> void:
+	# Military olive drab material
+	var military_mat := StandardMaterial3D.new()
+	military_mat.albedo_color = Color(0.35, 0.4, 0.25)
+	military_mat.metallic = 0.3
+	military_mat.roughness = 0.7
+
+	# Dark metal for weapons/equipment
+	var metal_mat := StandardMaterial3D.new()
+	metal_mat.albedo_color = Color(0.2, 0.2, 0.22)
+	metal_mat.metallic = 0.8
+	metal_mat.roughness = 0.4
+
+	# Tan/khaki accent
+	var tan_mat := StandardMaterial3D.new()
+	tan_mat.albedo_color = Color(0.6, 0.5, 0.35)
+	tan_mat.metallic = 0.2
+	tan_mat.roughness = 0.6
+
+	# Red accent (warning lights, insignia)
+	var red_mat := StandardMaterial3D.new()
+	red_mat.albedo_color = Color(0.8, 0.2, 0.15)
+	red_mat.emission_enabled = true
+	red_mat.emission = Color(0.7, 0.15, 0.1)
+	red_mat.emission_energy_multiplier = 1.5
+
+	match unit_type:
+		"scout", "light":
+			# INFANTRY SCOUT - soldier with rifle and backpack
+			# Torso
+			var torso := CSGBox3D.new()
+			torso.size = Vector3(base_size.x * 0.4, base_size.y * 0.35, base_size.z * 0.25)
+			torso.position.y = base_size.y * 0.1
+			torso.material = military_mat
+			root.add_child(torso)
+
+			# Head with helmet
+			var head := CSGSphere3D.new()
+			head.radius = base_size.x * 0.15
+			head.position = Vector3(0, base_size.y * 0.4, 0)
+			head.material = military_mat
+			root.add_child(head)
+
+			# Helmet brim
+			var helmet := CSGCylinder3D.new()
+			helmet.radius = base_size.x * 0.18
+			helmet.height = base_size.y * 0.08
+			helmet.position = Vector3(0, base_size.y * 0.42, 0)
+			helmet.material = military_mat
+			root.add_child(helmet)
+
+			# Visor/goggles
+			var visor := CSGBox3D.new()
+			visor.size = Vector3(base_size.x * 0.2, base_size.y * 0.05, base_size.z * 0.05)
+			visor.position = Vector3(0, base_size.y * 0.38, base_size.z * 0.12)
+			visor.material = red_mat
+			root.add_child(visor)
+
+			# Legs
+			for side in [-1.0, 1.0]:
+				var leg := CSGCylinder3D.new()
+				leg.radius = base_size.x * 0.08
+				leg.height = base_size.y * 0.35
+				leg.position = Vector3(side * base_size.x * 0.12, -base_size.y * 0.25, 0)
+				leg.material = military_mat
+				root.add_child(leg)
+
+				# Boot
+				var boot := CSGBox3D.new()
+				boot.size = Vector3(base_size.x * 0.1, base_size.y * 0.08, base_size.z * 0.15)
+				boot.position = Vector3(side * base_size.x * 0.12, -base_size.y * 0.45, base_size.z * 0.03)
+				boot.material = tan_mat
+				root.add_child(boot)
+
+			# Arms
+			for side in [-1.0, 1.0]:
+				var arm := CSGCylinder3D.new()
+				arm.radius = base_size.x * 0.06
+				arm.height = base_size.y * 0.25
+				arm.position = Vector3(side * base_size.x * 0.25, base_size.y * 0.05, 0)
+				arm.rotation.z = side * 0.3
+				arm.material = military_mat
+				root.add_child(arm)
+
+			# Rifle (held diagonally across body)
+			var rifle := CSGBox3D.new()
+			rifle.size = Vector3(base_size.x * 0.06, base_size.y * 0.5, base_size.z * 0.06)
+			rifle.position = Vector3(base_size.x * 0.15, base_size.y * 0.1, base_size.z * 0.15)
+			rifle.rotation.z = -0.3
+			rifle.rotation.x = 0.2
+			rifle.material = metal_mat
+			root.add_child(rifle)
+
+			# Backpack
+			var pack := CSGBox3D.new()
+			pack.size = Vector3(base_size.x * 0.3, base_size.y * 0.25, base_size.z * 0.15)
+			pack.position = Vector3(0, base_size.y * 0.1, -base_size.z * 0.18)
+			pack.material = tan_mat
+			root.add_child(pack)
+
+		"soldier", "medium":
+			# HEAVY TROOPER - armored soldier with heavy weapon
+			# Armored torso (bulkier)
+			var torso := CSGBox3D.new()
+			torso.size = Vector3(base_size.x * 0.5, base_size.y * 0.4, base_size.z * 0.35)
+			torso.position.y = base_size.y * 0.05
+			torso.material = military_mat
+			root.add_child(torso)
+
+			# Chest armor plate
+			var chest := CSGBox3D.new()
+			chest.size = Vector3(base_size.x * 0.45, base_size.y * 0.3, base_size.z * 0.08)
+			chest.position = Vector3(0, base_size.y * 0.08, base_size.z * 0.2)
+			chest.material = tan_mat
+			root.add_child(chest)
+
+			# Helmeted head
+			var head := CSGBox3D.new()
+			head.size = Vector3(base_size.x * 0.3, base_size.y * 0.25, base_size.z * 0.28)
+			head.position = Vector3(0, base_size.y * 0.35, 0)
+			head.material = military_mat
+			root.add_child(head)
+
+			# Face plate / visor
+			var visor := CSGBox3D.new()
+			visor.size = Vector3(base_size.x * 0.22, base_size.y * 0.1, base_size.z * 0.05)
+			visor.position = Vector3(0, base_size.y * 0.33, base_size.z * 0.15)
+			visor.material = red_mat
+			root.add_child(visor)
+
+			# Shoulder pads
+			for side in [-1.0, 1.0]:
+				var shoulder := CSGBox3D.new()
+				shoulder.size = Vector3(base_size.x * 0.18, base_size.y * 0.12, base_size.z * 0.2)
+				shoulder.position = Vector3(side * base_size.x * 0.32, base_size.y * 0.2, 0)
+				shoulder.material = tan_mat
+				root.add_child(shoulder)
+
+			# Legs (armored)
+			for side in [-1.0, 1.0]:
+				var thigh := CSGBox3D.new()
+				thigh.size = Vector3(base_size.x * 0.15, base_size.y * 0.2, base_size.z * 0.15)
+				thigh.position = Vector3(side * base_size.x * 0.15, -base_size.y * 0.2, 0)
+				thigh.material = military_mat
+				root.add_child(thigh)
+
+				var shin := CSGBox3D.new()
+				shin.size = Vector3(base_size.x * 0.12, base_size.y * 0.2, base_size.z * 0.12)
+				shin.position = Vector3(side * base_size.x * 0.15, -base_size.y * 0.4, 0)
+				shin.material = military_mat
+				root.add_child(shin)
+
+			# Heavy machine gun (on right side)
+			var gun_body := CSGBox3D.new()
+			gun_body.size = Vector3(base_size.x * 0.1, base_size.y * 0.12, base_size.z * 0.45)
+			gun_body.position = Vector3(base_size.x * 0.35, base_size.y * 0.0, base_size.z * 0.2)
+			gun_body.material = metal_mat
+			root.add_child(gun_body)
+
+			# Gun barrel
+			var barrel := CSGCylinder3D.new()
+			barrel.radius = base_size.x * 0.03
+			barrel.height = base_size.z * 0.3
+			barrel.rotation.x = PI / 2
+			barrel.position = Vector3(base_size.x * 0.35, base_size.y * 0.0, base_size.z * 0.55)
+			barrel.material = metal_mat
+			root.add_child(barrel)
+
+			# Ammo belt/box
+			var ammo := CSGBox3D.new()
+			ammo.size = Vector3(base_size.x * 0.15, base_size.y * 0.15, base_size.z * 0.1)
+			ammo.position = Vector3(base_size.x * 0.25, -base_size.y * 0.1, base_size.z * 0.1)
+			ammo.material = tan_mat
+			root.add_child(ammo)
+
+		"tank", "heavy":
+			# MILITARY APC / ARMORED VEHICLE - tracked vehicle with turret
+			# Main hull
+			var hull := CSGBox3D.new()
+			hull.size = Vector3(base_size.x * 0.8, base_size.y * 0.35, base_size.z * 0.9)
+			hull.position.y = -base_size.y * 0.05
+			hull.material = military_mat
+			root.add_child(hull)
+
+			# Sloped front armor
+			var front := CSGBox3D.new()
+			front.size = Vector3(base_size.x * 0.75, base_size.y * 0.25, base_size.z * 0.15)
+			front.position = Vector3(0, base_size.y * 0.05, base_size.z * 0.45)
+			front.rotation.x = -0.4
+			front.material = military_mat
+			root.add_child(front)
+
+			# Track assemblies
+			for side in [-1.0, 1.0]:
+				var track := CSGBox3D.new()
+				track.size = Vector3(base_size.x * 0.15, base_size.y * 0.3, base_size.z * 0.95)
+				track.position = Vector3(side * base_size.x * 0.45, -base_size.y * 0.1, 0)
+				track.material = metal_mat
+				root.add_child(track)
+
+				# Road wheels (5 per side)
+				for w in range(5):
+					var wheel := CSGCylinder3D.new()
+					wheel.radius = base_size.y * 0.12
+					wheel.height = base_size.x * 0.06
+					wheel.rotation.z = PI / 2
+					wheel.position = Vector3(side * base_size.x * 0.52, -base_size.y * 0.15, (w - 2) * base_size.z * 0.2)
+					wheel.material = metal_mat
+					root.add_child(wheel)
+
+			# Turret base
+			var turret_base := CSGCylinder3D.new()
+			turret_base.radius = base_size.x * 0.25
+			turret_base.height = base_size.y * 0.15
+			turret_base.position = Vector3(0, base_size.y * 0.2, -base_size.z * 0.1)
+			turret_base.material = military_mat
+			root.add_child(turret_base)
+
+			# Turret housing
+			var turret := CSGBox3D.new()
+			turret.size = Vector3(base_size.x * 0.4, base_size.y * 0.2, base_size.z * 0.35)
+			turret.position = Vector3(0, base_size.y * 0.35, -base_size.z * 0.05)
+			turret.material = military_mat
+			root.add_child(turret)
+
+			# Main cannon
+			var cannon := CSGCylinder3D.new()
+			cannon.radius = base_size.x * 0.06
+			cannon.height = base_size.z * 0.7
+			cannon.rotation.x = PI / 2
+			cannon.position = Vector3(0, base_size.y * 0.35, base_size.z * 0.45)
+			cannon.material = metal_mat
+			root.add_child(cannon)
+
+			# Coaxial machine gun
+			var coax := CSGCylinder3D.new()
+			coax.radius = base_size.x * 0.025
+			coax.height = base_size.z * 0.4
+			coax.rotation.x = PI / 2
+			coax.position = Vector3(base_size.x * 0.12, base_size.y * 0.32, base_size.z * 0.35)
+			coax.material = metal_mat
+			root.add_child(coax)
+
+			# Antenna
+			var antenna := CSGCylinder3D.new()
+			antenna.radius = base_size.x * 0.015
+			antenna.height = base_size.y * 0.4
+			antenna.position = Vector3(-base_size.x * 0.3, base_size.y * 0.45, -base_size.z * 0.3)
+			antenna.material = metal_mat
+			root.add_child(antenna)
+
+			# Hatches
+			for hatch_x in [-0.15, 0.15]:
+				var hatch := CSGCylinder3D.new()
+				hatch.radius = base_size.x * 0.08
+				hatch.height = base_size.y * 0.05
+				hatch.position = Vector3(hatch_x * base_size.x, base_size.y * 0.47, -base_size.z * 0.15)
+				hatch.material = tan_mat
+				root.add_child(hatch)
+
+			# Rear stowage box
+			var stowage := CSGBox3D.new()
+			stowage.size = Vector3(base_size.x * 0.6, base_size.y * 0.15, base_size.z * 0.12)
+			stowage.position = Vector3(0, base_size.y * 0.05, -base_size.z * 0.5)
+			stowage.material = tan_mat
+			root.add_child(stowage)
+
+			# Warning light
+			var light := CSGSphere3D.new()
+			light.radius = base_size.x * 0.04
+			light.position = Vector3(base_size.x * 0.35, base_size.y * 0.15, base_size.z * 0.35)
+			light.material = red_mat
+			root.add_child(light)
+
+
+## Add harvester visual parts - faction-specific collector designs.
+## Each faction has a unique non-combat collector themed to their aesthetics.
+func _add_harvester_parts(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, faction_id: int, faction_color: Color) -> void:
+	# Gold/amber accent for all harvesters to distinguish from combat units
+	var gold_accent := StandardMaterial3D.new()
+	gold_accent.albedo_color = Color(0.85, 0.7, 0.2)
+	gold_accent.metallic = 0.9
+	gold_accent.roughness = 0.3
+	gold_accent.emission_enabled = true
+	gold_accent.emission = Color(0.9, 0.7, 0.15)
+	gold_accent.emission_energy_multiplier = 0.8
+
+	# Set up faction-colored base material
+	mat.albedo_color = faction_color * 0.8 + Color(0.2, 0.15, 0.0)  # Slightly golden tint
+	mat.emission = faction_color * 0.3
+	mat.metallic = 0.6
+
+	match faction_id:
+		1:  # Aether Swarm - PHASE COLLECTOR
+			# Small hovering drone with energy scoops, ethereal and translucent
+			_add_aether_harvester(root, base_size, mat, gold_accent)
+		2:  # OptiForge Legion - WORKER UNIT
+			# Industrial humanoid with collection claws and backpack container
+			_add_optiforge_harvester(root, base_size, mat, gold_accent)
+		3:  # Dynapods Vanguard - SCAVENGER CRAB
+			# Low-profile multi-legged with pincers and shell storage
+			_add_dynapods_harvester(root, base_size, mat, gold_accent)
+		4:  # LogiBots Colossus - MINING VEHICLE
+			# Tracked vehicle with crane arm and cargo hopper
+			_add_logibots_harvester(root, base_size, mat, gold_accent)
+		5:  # Human Remnant - SUPPLY TRUCK
+			# Military cargo truck for salvage operations
+			_add_human_harvester(root, base_size, mat, gold_accent)
+		_:  # Default simple harvester
+			_add_default_harvester(root, base_size, mat, gold_accent)
+
+
+## Aether Swarm harvester - Phase Collector drone with energy scoops
+func _add_aether_harvester(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, gold: StandardMaterial3D) -> void:
+	# Translucent energy material
+	var energy_mat := StandardMaterial3D.new()
+	energy_mat.albedo_color = Color(0.5, 0.9, 1.0, 0.5)
+	energy_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	energy_mat.emission_enabled = true
+	energy_mat.emission = Color(0.4, 0.85, 1.0)
+	energy_mat.emission_energy_multiplier = 2.0
+
+	# Small central core - compact oval body
+	var core := CSGSphere3D.new()
+	core.radius = base_size.x * 0.3
+	core.radial_segments = 12
+	core.rings = 8
+	core.material = mat
+	root.add_child(core)
+
+	# Energy collection ring (torus-like using cylinder)
+	var ring := CSGCylinder3D.new()
+	ring.radius = base_size.x * 0.45
+	ring.height = base_size.y * 0.08
+	ring.position.y = base_size.y * 0.1
+	ring.material = energy_mat
+	root.add_child(ring)
+
+	# Four small hover pods underneath
+	for i in range(4):
+		var angle: float = (i * PI / 2) + (PI / 4)
+		var pod := CSGSphere3D.new()
+		pod.radius = base_size.x * 0.08
+		pod.position = Vector3(cos(angle) * base_size.x * 0.35, -base_size.y * 0.15, sin(angle) * base_size.z * 0.35)
+		pod.material = gold
+		root.add_child(pod)
+
+	# Energy scoop arms (2 translucent collector tendrils)
+	for side in [-1.0, 1.0]:
+		var arm := CSGCylinder3D.new()
+		arm.radius = base_size.x * 0.03
+		arm.height = base_size.x * 0.5
+		arm.position = Vector3(side * base_size.x * 0.3, -base_size.y * 0.1, base_size.z * 0.2)
+		arm.rotation.z = side * 0.4
+		arm.rotation.x = 0.3
+		arm.material = energy_mat
+		root.add_child(arm)
+
+		# Scoop tip
+		var tip := CSGSphere3D.new()
+		tip.radius = base_size.x * 0.06
+		tip.position = Vector3(side * base_size.x * 0.5, -base_size.y * 0.25, base_size.z * 0.35)
+		tip.material = gold
+		root.add_child(tip)
+
+	# Small cargo container on top (translucent to show collected REE)
+	var cargo := CSGBox3D.new()
+	cargo.size = Vector3(base_size.x * 0.35, base_size.y * 0.25, base_size.z * 0.35)
+	cargo.position = Vector3(0, base_size.y * 0.25, -base_size.z * 0.1)
+	var cargo_mat := energy_mat.duplicate()
+	cargo_mat.albedo_color = Color(0.9, 0.8, 0.3, 0.6)
+	cargo_mat.emission = Color(0.9, 0.75, 0.2)
+	cargo.material = cargo_mat
+	root.add_child(cargo)
+
+
+## OptiForge Legion harvester - Worker Unit with claws and backpack
+func _add_optiforge_harvester(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, gold: StandardMaterial3D) -> void:
+	# Industrial accent
+	var industrial_mat := StandardMaterial3D.new()
+	industrial_mat.albedo_color = Color(0.3, 0.3, 0.35)
+	industrial_mat.metallic = 0.8
+	industrial_mat.roughness = 0.4
+
+	# Squat torso - wider than tall (worker bot)
+	var torso := CSGBox3D.new()
+	torso.size = Vector3(base_size.x * 0.6, base_size.y * 0.5, base_size.z * 0.5)
+	torso.material = mat
+	root.add_child(torso)
+
+	# Small head with visor
+	var head := CSGBox3D.new()
+	head.size = Vector3(base_size.x * 0.3, base_size.y * 0.2, base_size.z * 0.25)
+	head.position = Vector3(0, base_size.y * 0.35, base_size.z * 0.1)
+	head.material = mat
+	root.add_child(head)
+
+	# Yellow visor
+	var visor := CSGBox3D.new()
+	visor.size = Vector3(base_size.x * 0.25, base_size.y * 0.08, base_size.z * 0.05)
+	visor.position = Vector3(0, base_size.y * 0.38, base_size.z * 0.25)
+	visor.material = gold
+	root.add_child(visor)
+
+	# Stubby legs (2)
+	for side in [-1.0, 1.0]:
+		var leg := CSGCylinder3D.new()
+		leg.radius = base_size.x * 0.1
+		leg.height = base_size.y * 0.35
+		leg.position = Vector3(side * base_size.x * 0.2, -base_size.y * 0.35, 0)
+		leg.material = industrial_mat
+		root.add_child(leg)
+
+		# Foot
+		var foot := CSGBox3D.new()
+		foot.size = Vector3(base_size.x * 0.15, base_size.y * 0.08, base_size.z * 0.2)
+		foot.position = Vector3(side * base_size.x * 0.2, -base_size.y * 0.55, base_size.z * 0.05)
+		foot.material = industrial_mat
+		root.add_child(foot)
+
+	# Collection claw arms (instead of weapons)
+	for side in [-1.0, 1.0]:
+		# Upper arm
+		var upper := CSGCylinder3D.new()
+		upper.radius = base_size.x * 0.06
+		upper.height = base_size.x * 0.3
+		upper.position = Vector3(side * base_size.x * 0.35, base_size.y * 0.1, base_size.z * 0.1)
+		upper.rotation.z = side * 0.5
+		upper.material = mat
+		root.add_child(upper)
+
+		# Forearm with claw
+		var forearm := CSGCylinder3D.new()
+		forearm.radius = base_size.x * 0.05
+		forearm.height = base_size.x * 0.25
+		forearm.position = Vector3(side * base_size.x * 0.5, -base_size.y * 0.05, base_size.z * 0.2)
+		forearm.rotation.x = 0.4
+		forearm.material = industrial_mat
+		root.add_child(forearm)
+
+		# Claw pincers (2 per arm)
+		for pincer in [-0.5, 0.5]:
+			var claw := CSGBox3D.new()
+			claw.size = Vector3(base_size.x * 0.02, base_size.y * 0.15, base_size.z * 0.04)
+			claw.position = Vector3(side * base_size.x * 0.52 + pincer * base_size.x * 0.05, -base_size.y * 0.2, base_size.z * 0.35)
+			claw.rotation.x = 0.3
+			claw.material = gold
+			root.add_child(claw)
+
+	# Large backpack storage container
+	var backpack := CSGBox3D.new()
+	backpack.size = Vector3(base_size.x * 0.5, base_size.y * 0.6, base_size.z * 0.4)
+	backpack.position = Vector3(0, base_size.y * 0.1, -base_size.z * 0.35)
+	backpack.material = industrial_mat
+	root.add_child(backpack)
+
+	# Gold trim on backpack
+	var trim := CSGBox3D.new()
+	trim.size = Vector3(base_size.x * 0.52, base_size.y * 0.05, base_size.z * 0.42)
+	trim.position = Vector3(0, base_size.y * 0.4, -base_size.z * 0.35)
+	trim.material = gold
+	root.add_child(trim)
+
+
+## Dynapods Vanguard harvester - Scavenger Crab with pincers
+func _add_dynapods_harvester(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, gold: StandardMaterial3D) -> void:
+	# Chitin-like material
+	var shell_mat := mat.duplicate()
+	shell_mat.roughness = 0.5
+
+	# Low, wide shell body (crab-like)
+	var shell := CSGBox3D.new()
+	shell.size = Vector3(base_size.x * 0.7, base_size.y * 0.3, base_size.z * 0.5)
+	shell.position.y = base_size.y * 0.05
+	shell.material = shell_mat
+	root.add_child(shell)
+
+	# Domed top shell
+	var dome := CSGSphere3D.new()
+	dome.radius = base_size.x * 0.35
+	dome.radial_segments = 12
+	dome.rings = 6
+	dome.position = Vector3(0, base_size.y * 0.15, 0)
+	dome.scale = Vector3(1.0, 0.5, 0.8)
+	dome.material = shell_mat
+	root.add_child(dome)
+
+	# Six scuttling legs (3 per side)
+	for side in [-1.0, 1.0]:
+		for leg_idx in range(3):
+			var z_offset: float = (leg_idx - 1) * base_size.z * 0.2
+
+			# Upper leg segment
+			var upper := CSGCylinder3D.new()
+			upper.radius = base_size.x * 0.03
+			upper.height = base_size.x * 0.25
+			upper.position = Vector3(side * base_size.x * 0.35, base_size.y * 0.05, z_offset)
+			upper.rotation.z = side * 1.0  # Angled outward
+			upper.material = mat
+			root.add_child(upper)
+
+			# Lower leg segment
+			var lower := CSGCylinder3D.new()
+			lower.radius = base_size.x * 0.025
+			lower.height = base_size.x * 0.2
+			lower.position = Vector3(side * base_size.x * 0.55, -base_size.y * 0.15, z_offset)
+			lower.rotation.z = side * -0.3
+			lower.material = mat
+			root.add_child(lower)
+
+	# Two large collection pincers in front
+	for side in [-1.0, 1.0]:
+		# Pincer arm
+		var arm := CSGCylinder3D.new()
+		arm.radius = base_size.x * 0.05
+		arm.height = base_size.x * 0.35
+		arm.position = Vector3(side * base_size.x * 0.25, base_size.y * 0.1, base_size.z * 0.35)
+		arm.rotation.x = 0.5
+		arm.rotation.z = side * 0.3
+		arm.material = mat
+		root.add_child(arm)
+
+		# Large pincer claw (two parts)
+		var claw_base := CSGBox3D.new()
+		claw_base.size = Vector3(base_size.x * 0.08, base_size.y * 0.2, base_size.z * 0.06)
+		claw_base.position = Vector3(side * base_size.x * 0.28, base_size.y * 0.0, base_size.z * 0.55)
+		claw_base.material = gold
+		root.add_child(claw_base)
+
+		var claw_tip := CSGBox3D.new()
+		claw_tip.size = Vector3(base_size.x * 0.06, base_size.y * 0.15, base_size.z * 0.04)
+		claw_tip.position = Vector3(side * base_size.x * 0.28 + side * base_size.x * 0.05, base_size.y * -0.05, base_size.z * 0.55)
+		claw_tip.rotation.z = side * -0.4
+		claw_tip.material = gold
+		root.add_child(claw_tip)
+
+	# Small eye stalks
+	for side in [-1.0, 1.0]:
+		var stalk := CSGCylinder3D.new()
+		stalk.radius = base_size.x * 0.02
+		stalk.height = base_size.y * 0.15
+		stalk.position = Vector3(side * base_size.x * 0.1, base_size.y * 0.3, base_size.z * 0.2)
+		stalk.material = mat
+		root.add_child(stalk)
+
+		var eye := CSGSphere3D.new()
+		eye.radius = base_size.x * 0.035
+		eye.position = Vector3(side * base_size.x * 0.1, base_size.y * 0.4, base_size.z * 0.2)
+		eye.material = gold
+		root.add_child(eye)
+
+	# Storage cavity on back (slightly open shell)
+	var cavity := CSGBox3D.new()
+	cavity.size = Vector3(base_size.x * 0.4, base_size.y * 0.2, base_size.z * 0.25)
+	cavity.position = Vector3(0, base_size.y * 0.2, -base_size.z * 0.15)
+	var cavity_mat := StandardMaterial3D.new()
+	cavity_mat.albedo_color = Color(0.15, 0.12, 0.1)
+	cavity.material = cavity_mat
+	root.add_child(cavity)
+
+
+## LogiBots Colossus harvester - Mining Vehicle with crane
+func _add_logibots_harvester(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, gold: StandardMaterial3D) -> void:
+	# Heavy industrial material
+	var steel_mat := StandardMaterial3D.new()
+	steel_mat.albedo_color = Color(0.25, 0.28, 0.3)
+	steel_mat.metallic = 0.9
+	steel_mat.roughness = 0.5
+
+	# Wide tracked chassis
+	var chassis := CSGBox3D.new()
+	chassis.size = Vector3(base_size.x * 0.8, base_size.y * 0.3, base_size.z * 0.6)
+	chassis.position.y = -base_size.y * 0.1
+	chassis.material = mat
+	root.add_child(chassis)
+
+	# Track assemblies (2 side pods)
+	for side in [-1.0, 1.0]:
+		var track := CSGBox3D.new()
+		track.size = Vector3(base_size.x * 0.15, base_size.y * 0.25, base_size.z * 0.7)
+		track.position = Vector3(side * base_size.x * 0.45, -base_size.y * 0.15, 0)
+		track.material = steel_mat
+		root.add_child(track)
+
+		# Track wheels (3 per side)
+		for w in range(3):
+			var wheel := CSGCylinder3D.new()
+			wheel.radius = base_size.y * 0.1
+			wheel.height = base_size.x * 0.05
+			wheel.position = Vector3(side * base_size.x * 0.52, -base_size.y * 0.2, (w - 1) * base_size.z * 0.25)
+			wheel.rotation.z = PI / 2
+			wheel.material = steel_mat
+			root.add_child(wheel)
+
+	# Large cargo hopper on back
+	var hopper := CSGBox3D.new()
+	hopper.size = Vector3(base_size.x * 0.6, base_size.y * 0.5, base_size.z * 0.4)
+	hopper.position = Vector3(0, base_size.y * 0.2, -base_size.z * 0.15)
+	hopper.material = steel_mat
+	root.add_child(hopper)
+
+	# Hopper rim (gold accent)
+	var rim := CSGBox3D.new()
+	rim.size = Vector3(base_size.x * 0.65, base_size.y * 0.06, base_size.z * 0.45)
+	rim.position = Vector3(0, base_size.y * 0.47, -base_size.z * 0.15)
+	rim.material = gold
+	root.add_child(rim)
+
+	# Small cab/control module
+	var cab := CSGBox3D.new()
+	cab.size = Vector3(base_size.x * 0.35, base_size.y * 0.25, base_size.z * 0.25)
+	cab.position = Vector3(-base_size.x * 0.15, base_size.y * 0.25, base_size.z * 0.2)
+	cab.material = mat
+	root.add_child(cab)
+
+	# Cab window
+	var window := CSGBox3D.new()
+	window.size = Vector3(base_size.x * 0.25, base_size.y * 0.12, base_size.z * 0.03)
+	window.position = Vector3(-base_size.x * 0.15, base_size.y * 0.32, base_size.z * 0.35)
+	var window_mat := StandardMaterial3D.new()
+	window_mat.albedo_color = Color(0.2, 0.3, 0.4)
+	window_mat.metallic = 0.5
+	window_mat.emission_enabled = true
+	window_mat.emission = Color(0.1, 0.2, 0.3)
+	window.material = window_mat
+	root.add_child(window)
+
+	# Crane arm assembly
+	# Base turret
+	var turret := CSGCylinder3D.new()
+	turret.radius = base_size.x * 0.12
+	turret.height = base_size.y * 0.15
+	turret.position = Vector3(base_size.x * 0.2, base_size.y * 0.2, base_size.z * 0.15)
+	turret.material = steel_mat
+	root.add_child(turret)
+
+	# Main crane arm
+	var arm1 := CSGBox3D.new()
+	arm1.size = Vector3(base_size.x * 0.08, base_size.y * 0.4, base_size.z * 0.08)
+	arm1.position = Vector3(base_size.x * 0.2, base_size.y * 0.45, base_size.z * 0.15)
+	arm1.rotation.x = -0.3
+	arm1.material = gold
+	root.add_child(arm1)
+
+	# Crane forearm
+	var arm2 := CSGBox3D.new()
+	arm2.size = Vector3(base_size.x * 0.06, base_size.y * 0.35, base_size.z * 0.06)
+	arm2.position = Vector3(base_size.x * 0.2, base_size.y * 0.55, base_size.z * 0.4)
+	arm2.rotation.x = 0.6
+	arm2.material = gold
+	root.add_child(arm2)
+
+	# Excavator bucket/scoop at end
+	var bucket := CSGBox3D.new()
+	bucket.size = Vector3(base_size.x * 0.2, base_size.y * 0.15, base_size.z * 0.15)
+	bucket.position = Vector3(base_size.x * 0.2, base_size.y * 0.35, base_size.z * 0.6)
+	bucket.rotation.x = 0.8
+	bucket.material = steel_mat
+	root.add_child(bucket)
+
+	# Bucket teeth
+	for t in range(3):
+		var tooth := CSGBox3D.new()
+		tooth.size = Vector3(base_size.x * 0.03, base_size.y * 0.08, base_size.z * 0.03)
+		tooth.position = Vector3(base_size.x * 0.2 + (t - 1) * base_size.x * 0.06, base_size.y * 0.25, base_size.z * 0.7)
+		tooth.material = gold
+		root.add_child(tooth)
+
+	# Warning light on cab
+	var light := CSGSphere3D.new()
+	light.radius = base_size.x * 0.05
+	light.position = Vector3(-base_size.x * 0.15, base_size.y * 0.42, base_size.z * 0.2)
+	light.material = gold
+	root.add_child(light)
+
+
+## Human Remnant harvester - Military Supply Truck
+func _add_human_harvester(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, gold: StandardMaterial3D) -> void:
+	# Military olive drab
+	var military_mat := StandardMaterial3D.new()
+	military_mat.albedo_color = Color(0.35, 0.4, 0.25)
+	military_mat.metallic = 0.3
+	military_mat.roughness = 0.7
+
+	# Canvas/tarp material for cargo cover
+	var canvas_mat := StandardMaterial3D.new()
+	canvas_mat.albedo_color = Color(0.5, 0.45, 0.35)
+	canvas_mat.roughness = 0.9
+
+	# Dark metal
+	var metal_mat := StandardMaterial3D.new()
+	metal_mat.albedo_color = Color(0.2, 0.2, 0.22)
+	metal_mat.metallic = 0.8
+
+	# Red tail lights
+	var red_mat := StandardMaterial3D.new()
+	red_mat.albedo_color = Color(0.8, 0.2, 0.15)
+	red_mat.emission_enabled = true
+	red_mat.emission = Color(0.6, 0.1, 0.05)
+	red_mat.emission_energy_multiplier = 1.2
+
+	# Truck cab
+	var cab := CSGBox3D.new()
+	cab.size = Vector3(base_size.x * 0.5, base_size.y * 0.45, base_size.z * 0.35)
+	cab.position = Vector3(0, base_size.y * 0.1, base_size.z * 0.3)
+	cab.material = military_mat
+	root.add_child(cab)
+
+	# Windshield
+	var windshield := CSGBox3D.new()
+	windshield.size = Vector3(base_size.x * 0.4, base_size.y * 0.2, base_size.z * 0.05)
+	windshield.position = Vector3(0, base_size.y * 0.25, base_size.z * 0.5)
+	windshield.rotation.x = -0.2
+	var glass_mat := StandardMaterial3D.new()
+	glass_mat.albedo_color = Color(0.3, 0.35, 0.4)
+	glass_mat.metallic = 0.4
+	windshield.material = glass_mat
+	root.add_child(windshield)
+
+	# Cab roof
+	var roof := CSGBox3D.new()
+	roof.size = Vector3(base_size.x * 0.52, base_size.y * 0.08, base_size.z * 0.38)
+	roof.position = Vector3(0, base_size.y * 0.36, base_size.z * 0.3)
+	roof.material = military_mat
+	root.add_child(roof)
+
+	# Truck bed frame
+	var bed := CSGBox3D.new()
+	bed.size = Vector3(base_size.x * 0.6, base_size.y * 0.1, base_size.z * 0.55)
+	bed.position = Vector3(0, -base_size.y * 0.1, -base_size.z * 0.15)
+	bed.material = military_mat
+	root.add_child(bed)
+
+	# Cargo area with canvas cover (curved top using box approximation)
+	var cargo_base := CSGBox3D.new()
+	cargo_base.size = Vector3(base_size.x * 0.55, base_size.y * 0.35, base_size.z * 0.5)
+	cargo_base.position = Vector3(0, base_size.y * 0.12, -base_size.z * 0.15)
+	cargo_base.material = canvas_mat
+	root.add_child(cargo_base)
+
+	# Canvas top (rounded appearance)
+	var cargo_top := CSGCylinder3D.new()
+	cargo_top.radius = base_size.x * 0.28
+	cargo_top.height = base_size.z * 0.5
+	cargo_top.rotation.x = PI / 2
+	cargo_top.position = Vector3(0, base_size.y * 0.32, -base_size.z * 0.15)
+	cargo_top.material = canvas_mat
+	root.add_child(cargo_top)
+
+	# Front wheels (2)
+	for side in [-1.0, 1.0]:
+		var wheel := CSGCylinder3D.new()
+		wheel.radius = base_size.y * 0.15
+		wheel.height = base_size.x * 0.08
+		wheel.rotation.z = PI / 2
+		wheel.position = Vector3(side * base_size.x * 0.3, -base_size.y * 0.25, base_size.z * 0.25)
+		wheel.material = metal_mat
+		root.add_child(wheel)
+
+	# Rear wheels (4 - dual axle)
+	for side in [-1.0, 1.0]:
+		for axle in [0.0, -0.15]:
+			var wheel := CSGCylinder3D.new()
+			wheel.radius = base_size.y * 0.15
+			wheel.height = base_size.x * 0.08
+			wheel.rotation.z = PI / 2
+			wheel.position = Vector3(side * base_size.x * 0.3, -base_size.y * 0.25, -base_size.z * 0.25 + axle * base_size.z)
+			wheel.material = metal_mat
+			root.add_child(wheel)
+
+	# Headlights
+	for side in [-1.0, 1.0]:
+		var headlight := CSGSphere3D.new()
+		headlight.radius = base_size.x * 0.05
+		headlight.position = Vector3(side * base_size.x * 0.2, base_size.y * 0.0, base_size.z * 0.5)
+		headlight.material = gold
+		root.add_child(headlight)
+
+	# Tail lights
+	for side in [-1.0, 1.0]:
+		var taillight := CSGBox3D.new()
+		taillight.size = Vector3(base_size.x * 0.06, base_size.y * 0.08, base_size.z * 0.03)
+		taillight.position = Vector3(side * base_size.x * 0.25, base_size.y * 0.0, -base_size.z * 0.42)
+		taillight.material = red_mat
+		root.add_child(taillight)
+
+	# Side mirrors
+	for side in [-1.0, 1.0]:
+		var mirror := CSGBox3D.new()
+		mirror.size = Vector3(base_size.x * 0.04, base_size.y * 0.08, base_size.z * 0.06)
+		mirror.position = Vector3(side * base_size.x * 0.3, base_size.y * 0.2, base_size.z * 0.35)
+		mirror.material = metal_mat
+		root.add_child(mirror)
+
+	# Spare tire on back
+	var spare := CSGCylinder3D.new()
+	spare.radius = base_size.y * 0.12
+	spare.height = base_size.x * 0.06
+	spare.rotation.x = PI / 2
+	spare.position = Vector3(0, base_size.y * 0.15, -base_size.z * 0.45)
+	spare.material = metal_mat
+	root.add_child(spare)
+
+
+## Default harvester fallback
+func _add_default_harvester(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, gold: StandardMaterial3D) -> void:
+	# Simple box body
 	var body := CSGBox3D.new()
 	body.size = base_size
 	body.material = mat
 	root.add_child(body)
 
 	# Collection scoop
-	var scoop_mat := StandardMaterial3D.new()
-	scoop_mat.albedo_color = Color(0.6, 0.5, 0.15)
-	scoop_mat.metallic = 0.9
-
 	var scoop := CSGBox3D.new()
 	scoop.size = Vector3(base_size.x * 0.6, base_size.y * 0.3, base_size.z * 0.8)
 	scoop.position = Vector3(base_size.x * 0.5, -base_size.y * 0.2, 0)
-	scoop.material = scoop_mat
+	scoop.material = gold
 	root.add_child(scoop)
 
-	# Storage container on back
+	# Storage container
 	var container := CSGBox3D.new()
 	container.size = Vector3(base_size.x * 0.7, base_size.y * 0.5, base_size.z * 0.5)
 	container.position = Vector3(-base_size.x * 0.3, base_size.y * 0.1, 0)
@@ -9745,12 +10553,7 @@ func _add_harvester_parts(root: CSGCombiner3D, base_size: Vector3, mat: Standard
 	var light := CSGSphere3D.new()
 	light.radius = base_size.x * 0.1
 	light.position = Vector3(0, base_size.y * 0.5, base_size.z * 0.3)
-	var light_mat := StandardMaterial3D.new()
-	light_mat.albedo_color = Color(0.2, 1.0, 0.3)
-	light_mat.emission_enabled = true
-	light_mat.emission = Color(0.3, 1.0, 0.4)
-	light_mat.emission_energy_multiplier = 2.0
-	light.material = light_mat
+	light.material = gold
 	root.add_child(light)
 
 
