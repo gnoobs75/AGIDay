@@ -102,22 +102,22 @@ shadow_enabled = true
 environment = SubResource("Environment_main")
 
 [node name="Factory1" type="CSGBox3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 10, -500)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 10, -1000)
 size = Vector3(50, 25, 50)
 material = SubResource("Mat_Factory1")
 
 [node name="Factory2" type="CSGBox3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 500, 10, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 10, 0)
 size = Vector3(50, 25, 50)
 material = SubResource("Mat_Factory2")
 
 [node name="Factory3" type="CSGBox3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 10, 500)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 10, 1000)
 size = Vector3(50, 25, 50)
 material = SubResource("Mat_Factory3")
 
 [node name="Factory4" type="CSGBox3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -500, 10, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1000, 10, 0)
 size = Vector3(50, 25, 50)
 material = SubResource("Mat_Factory4")
 

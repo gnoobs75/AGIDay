@@ -97,11 +97,12 @@ func damage_voxel_immediate(world_pos: Vector3i, damage: int, current_time: floa
 		return -1
 
 	var local := _world_to_local(world_pos)
-	var old_hp := chunk.get_voxel(local.x, local.y).current_hp if chunk.get_voxel(local.x, local.y) else 0.0
+	var voxel_data: VoxelStateData = chunk.get_voxel(local.x, local.y)
+	var old_hp: int = voxel_data.current_hp if voxel_data != null else 0
 	var result := chunk.damage_voxel(local.x, local.y, damage, current_time)
 
 	if result >= 0:
-		var voxel := chunk.get_voxel(local.x, local.y)
+		var voxel: VoxelStateData = chunk.get_voxel(local.x, local.y)
 		voxel_damaged.emit(world_pos, float(damage), float(voxel.current_hp))
 
 	return result
@@ -170,9 +171,10 @@ func get_chunk_by_id(chunk_id: int) -> VoxelChunk:
 
 ## Convert world to local chunk coordinates.
 func _world_to_local(world_pos: Vector3i) -> Vector2i:
+	# Use posmod to handle negative coordinates correctly
 	return Vector2i(
-		world_pos.x % VoxelChunk.CHUNK_SIZE,
-		world_pos.z % VoxelChunk.CHUNK_SIZE
+		posmod(world_pos.x, VoxelChunk.CHUNK_SIZE),
+		posmod(world_pos.z, VoxelChunk.CHUNK_SIZE)
 	)
 
 

@@ -78,9 +78,14 @@ func _initialize_storage() -> void:
 
 ## Get voxel at local coordinates.
 func get_voxel(local_x: int, local_z: int) -> VoxelStateData:
+	if not is_loaded or _voxels.is_empty():
+		return null
 	if not _is_valid_local(local_x, local_z):
 		return null
-	return _voxels[_get_index(local_x, local_z)]
+	var idx := _get_index(local_x, local_z)
+	if idx < 0 or idx >= _voxels.size():
+		return null
+	return _voxels[idx]
 
 
 ## Get voxel at local position vector.
@@ -97,7 +102,7 @@ func set_voxel(local_x: int, local_z: int, voxel: VoxelStateData) -> void:
 	_mark_dirty(idx)
 
 
-## Apply damage to voxel at local coordinates.
+## Apply damage to voxel at local coordinates.ww
 func damage_voxel(local_x: int, local_z: int, damage: int, current_time: float = 0.0) -> int:
 	var voxel := get_voxel(local_x, local_z)
 	if voxel == null:

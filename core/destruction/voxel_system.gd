@@ -1,5 +1,5 @@
 class_name VoxelSystem
-extends Node
+extends Node3D
 ## VoxelSystem is the main facade integrating all voxel subsystems.
 ## Provides unified API for destruction, repair, persistence, and visualization.
 
@@ -190,7 +190,7 @@ func cancel_repair(builder_id: int) -> void:
 
 
 ## Get voxel at position.
-func get_voxel(position: Vector3i) -> VoxelState:
+func get_voxel(position: Vector3i) -> VoxelStateData:
 	if chunk_manager != null:
 		return chunk_manager.get_voxel(position)
 	return null
@@ -224,14 +224,14 @@ func register_strategic_pathway(position: Vector3i) -> void:
 
 
 ## Get all damaged voxels.
-func get_all_damaged_voxels() -> Array[VoxelState]:
+func get_all_damaged_voxels() -> Array[VoxelStateData]:
 	if chunk_manager != null:
 		return chunk_manager.get_all_damaged_voxels()
 	return []
 
 
 ## Get damaged voxels in radius.
-func get_damaged_voxels_in_radius(center: Vector3i, radius: int) -> Array[VoxelState]:
+func get_damaged_voxels_in_radius(center: Vector3i, radius: int) -> Array[VoxelStateData]:
 	if chunk_manager != null:
 		return chunk_manager.get_damaged_voxels_in_radius(center, radius)
 	return []

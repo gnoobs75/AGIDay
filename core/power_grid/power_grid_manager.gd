@@ -144,6 +144,21 @@ func get_network(network_id: int) -> PowerNetwork:
 	return _networks.get(network_id)
 
 
+## Get all plants dictionary (for UI display).
+func get_all_plants() -> Dictionary:
+	return _plants
+
+
+## Get all lines dictionary (for UI display).
+func get_all_lines() -> Dictionary:
+	return _lines
+
+
+## Get all districts dictionary (for UI display).
+func get_all_districts() -> Dictionary:
+	return _districts
+
+
 ## Set daylight multiplier for all solar plants.
 func set_daylight_multiplier(multiplier: float) -> void:
 	_daylight_multiplier = clampf(multiplier, 0.0, 1.0)

@@ -23,8 +23,8 @@ extends Node3D
 const CAMERA_PAN_SPEED := 150.0
 const CAMERA_ZOOM_STEP := 25.0  # Height change per mouse wheel tick
 const CAMERA_MIN_HEIGHT := 50.0
-const CAMERA_MAX_HEIGHT := 350.0  # Limited to avoid seeing map edges
-const CAMERA_BOUNDS := 280.0  # Slightly larger than factory positions (±250)
+const CAMERA_MAX_HEIGHT := 600.0  # Allow zooming out to see larger map
+const CAMERA_BOUNDS := 1400.0  # Allow viewing behind factories at ±1000
 const EDGE_PAN_MARGIN := 25  # Pixels from screen edge to trigger panning
 const CAMERA_SMOOTH_SPEED := 8.0  # Position interpolation speed
 const CAMERA_ZOOM_SMOOTH := 6.0  # Zoom interpolation speed
@@ -76,6 +76,44 @@ var _projectile_container: Node3D
 var _health_bar_container: Node3D
 var _effects_container: Node3D
 
+## Unit ejection animation system (UnitEjectionAnimation instance)
+var _unit_ejection_animation: RefCounted = null
+var _pending_ejections: Dictionary = {}  ## ejection_id -> unit Dictionary
+
+## MultiMesh rendering system for batched unit rendering (reduces draw calls from 5000+ to ~20)
+var _multimesh_renderer: RefCounted = null
+## Use MultiMesh for rendering (set false to use individual meshes for debugging)
+var _use_multimesh_rendering := true
+
+## LOD system for unit visual detail based on camera distance
+var _lod_system: RefCounted = null
+## Performance tier system for AI update frequency based on combat proximity
+var _performance_tier_system: RefCounted = null
+## Enable performance tier system (throttles AI updates based on combat)
+var _use_performance_tiers := true
+
+## Frustum culling system - only render units within camera view
+var _use_frustum_culling := true
+## Max render distance from camera (units beyond this are hidden)
+var _max_render_distance := 800.0
+## Margin around visible area (units just outside view stay rendered for smooth edges)
+var _frustum_margin := 100.0
+## Cached camera frustum bounds (min_x, max_x, min_z, max_z)
+var _frustum_bounds: Array = [0.0, 0.0, 0.0, 0.0]
+## Stats for visibility culling
+var _visible_unit_count := 0
+var _culled_unit_count := 0
+
+## Voxel terrain system for destructible buildings and terrain
+var _voxel_system: Node3D = null
+## Enable voxel terrain destruction
+var _use_voxel_terrain := true
+
+## Dynamic navigation mesh manager for pathfinding with destructible terrain
+var _navmesh_manager: Node3D = null
+## VoxelPathfindingBridge for batching nav updates
+var _pathfinding_bridge: VoxelPathfindingBridge = null
+
 ## Unit tracking
 var _units: Array = []  # Array of unit dictionaries
 var _projectiles: Array = []
@@ -90,6 +128,14 @@ var _box_select_start := Vector2.ZERO
 var _box_select_end := Vector2.ZERO
 var _selection_box: ColorRect = null
 const BOX_SELECT_THRESHOLD := 5.0  # Minimum drag distance to trigger box select
+
+## Drag formation state (right-click drag to set formation direction)
+var _is_drag_forming := false
+var _drag_form_start := Vector2.ZERO  # Screen position where drag started
+var _drag_form_end := Vector2.ZERO    # Current drag end position
+var _drag_form_world_start := Vector3.ZERO  # World position of drag start
+var _drag_form_preview_lines: Array[MeshInstance3D] = []  # Visual preview
+const DRAG_FORM_THRESHOLD := 15.0  # Minimum drag distance to create formation
 
 ## Command mode state
 var _attack_move_mode := false  # When true, next right-click is attack-move
@@ -110,6 +156,16 @@ var _faction_info_panel: Control = null
 var _faction_info_visible := false
 var _faction_info_viewports: Array[SubViewport] = []  # For rotating unit models
 var _faction_info_models: Array[Node3D] = []  # The actual 3D models to rotate
+
+## Unit spec popup (detailed blueprint view)
+var _unit_spec_popup: Control = null
+var _unit_spec_visible := false
+var _unit_spec_model_container: Node3D = null
+var _unit_spec_viewport: SubViewport = null
+var _unit_spec_combat_viewport: SubViewport = null
+var _unit_spec_combat_units: Array[Dictionary] = []  # Units in the combat preview
+var _unit_spec_current_template: UnitTemplate = null
+var _unit_spec_current_weight_class: String = ""
 
 ## Unit display names for character sheets
 const UNIT_DISPLAY_NAMES := {
@@ -184,6 +240,18 @@ const FACTORY_UPGRADE_BONUSES := [
 
 ## Rally points
 var _rally_points: Dictionary = {}  # faction_id -> Vector3
+
+## Factory selection state
+var _factory_selected := false  # True when player's factory is selected
+var _factory_production_panel: PanelContainer = null  # UI panel for production when factory selected
+var _factory_queue_list_container: VBoxContainer = null  # Container for detailed queue items
+var _factory_current_production_bar: ProgressBar = null  # Progress bar for current production in factory panel
+var _factory_queue_counts: Dictionary = {}  # unit_class -> count to queue
+
+## Power Grid overlay UI
+var _power_grid_overlay_visible := false
+var _power_status_panel: PowerStatusPanel = null
+var _power_grid_display: PowerGridDisplay = null
 
 ## Patrol state
 var _patrol_mode := false  # When true, next clicks add patrol waypoints
@@ -362,6 +430,8 @@ const MAX_SOUNDS_PER_FRAME := 4  # Max concurrent sounds per frame
 
 ## Audio Manager (advanced audio system with dynamic music)
 var _audio_manager: AudioManager = null
+## Battle intensity tracker for dynamic music (calculates intensity from combat events)
+var _battle_intensity_tracker: BattleIntensityTracker = null
 var _combat_intensity_update_timer: float = 0.0
 const COMBAT_INTENSITY_UPDATE_INTERVAL := 0.5  # Update combat intensity twice per second
 
@@ -383,6 +453,17 @@ const KILL_FEED_DURATION := 5.0  # Seconds before entry fades out
 var _factory_status_panel: PanelContainer = null
 var _factory_status_bars: Dictionary = {}  # faction_id -> {bar, label}
 
+## Factory construction system
+var _factory_construction: FactoryConstruction = null
+var _construction_placement_mode := false  # True when placing new factory
+var _construction_preview: Node3D = null  # Ghost preview of factory placement
+var _construction_sites: Dictionary = {}  # site_id -> visual node
+
+## Building ruins (destroyed buildings where new factories can be placed)
+var _building_ruins: Array[Dictionary] = []  # [{position: Vector3, size: Vector3, age: float}]
+const RUINS_MAX_AGE := 300.0  # Ruins last 5 minutes before clearing
+const RUINS_PLACEMENT_RADIUS := 15.0  # Click radius for placing on ruins
+
 ## Power grid system
 var _power_grid_manager: PowerGridManager = null
 var _brownout_system: BrownoutSystem = null
@@ -392,16 +473,17 @@ var _power_status_label: Label = null
 const POWER_PLANT_OUTPUT := 100.0  # Power output per plant
 const FACTORY_POWER_DEMAND := 50.0  # Power required by each factory
 
-## District capture system (5x5 grid, 25 districts)
-const DISTRICT_GRID_SIZE := 5
-const DISTRICT_SIZE := 240.0  # Each district is 240x240 units (doubled for 1200 map)
-const DISTRICT_OFFSET := -600.0  # Map starts at -600
+## District capture system (8x8 grid, 64 districts for doubled map)
+const DISTRICT_GRID_SIZE := 8
+const DISTRICT_SIZE := 300.0  # Each district is 300x300 units (8*300 = 2400 map)
+const DISTRICT_OFFSET := -1200.0  # Map starts at -1200 (half of 2400)
 const DISTRICT_CAPTURE_RATE := 0.05  # Capture progress per second per unit
 const DISTRICT_DECAY_RATE := 0.02  # Progress decay when no units
 const DISTRICT_INCOME_RATE := 3.0  # REE per second per controlled district
 var _districts: Array[Dictionary] = []  # Array of district data
 var _district_visuals: Array[Node3D] = []  # Visual indicators for districts
 var _district_labels: Array[Label3D] = []  # District ownership labels
+var _district_overlay: DistrictOverlay = null  # Territory ownership ground tinting
 var _district_status_label: Label = null  # UI label for district count
 
 ## Control group badges
@@ -437,6 +519,10 @@ const STANCE_COLORS := {
 	1: Color(0.3, 0.6, 1.0),  # DEFENSIVE - Blue
 	2: Color(1.0, 0.8, 0.2),  # HOLD_POSITION - Yellow
 }
+## PERFORMANCE: Cached meshes and materials for stance indicators (avoid per-frame allocations)
+var _stance_meshes: Dictionary = {}  # stance -> Mesh (pre-created once)
+var _stance_materials: Dictionary = {}  # stance -> StandardMaterial3D (pre-created once)
+var _selected_unit_ids: Dictionary = {}  # unit_id -> true (for O(1) lookup)
 
 ## Rally point visual line
 var _rally_line: MeshInstance3D = null
@@ -503,6 +589,13 @@ var _portrait_icons: Array[Control] = []
 const PORTRAIT_SIZE := 48  # Size of each unit portrait
 const PORTRAIT_MAX_DISPLAY := 16  # Max portraits to show
 const PORTRAIT_SPACING := 4  # Gap between portraits
+const PORTRAIT_TASK_HEIGHT := 14  # Extra height for task status text
+
+## Unit overview panel (right side - shows all player units by type)
+var _unit_overview_panel: PanelContainer = null
+var _unit_overview_rows: Dictionary = {}  # unit_type -> row container
+const UNIT_OVERVIEW_ICON_SIZE := 10  # Small dots for each unit
+const UNIT_OVERVIEW_MAX_PER_ROW := 30  # Max units shown per row
 
 ## Camera bookmarks (F9-F12)
 var _camera_bookmarks: Dictionary = {}  # slot (9-12) -> Vector3 position
@@ -709,6 +802,39 @@ const FACTION_UI_THEMES := {
 	},
 }
 
+## Unit-type-specific projectile modifiers (applied on top of faction styles)
+const UNIT_TYPE_PROJECTILE_MODS := {
+	"scout": {
+		"shape_override": "sphere",    # Small rapid energy bolts
+		"size_mult": 0.6,              # Smaller projectiles
+		"speed_mult": 1.3,             # Faster
+		"trail_segments": 3,           # Short trail
+		"glow_intensity": 2.0
+	},
+	"soldier": {
+		"shape_override": "cylinder",  # Medium beam shots
+		"size_mult": 1.0,              # Standard size
+		"speed_mult": 1.0,             # Normal speed
+		"trail_segments": 5,           # Medium trail
+		"glow_intensity": 2.5
+	},
+	"tank": {
+		"shape_override": "box",       # Heavy artillery shells
+		"size_mult": 1.8,              # Large projectiles
+		"speed_mult": 0.7,             # Slower but powerful
+		"trail_segments": 8,           # Long smoke trail
+		"glow_intensity": 1.5,
+		"smoke_trail": true            # Adds smoke effect
+	},
+	"harvester": {
+		"shape_override": "sphere",    # Defensive shots
+		"size_mult": 0.4,              # Very small
+		"speed_mult": 1.2,             # Quick defense
+		"trail_segments": 2,           # Minimal trail
+		"glow_intensity": 1.0
+	}
+}
+
 ## Faction-specific projectile visual styles
 const FACTION_PROJECTILE_STYLES := {
 	# Aether Swarm: Small, rapid plasma bolts with electric blue glow
@@ -767,15 +893,15 @@ const FACTION_NAMES := {
 	5: "HUMAN REMNANT"
 }
 
-## Map size (ground covers -MAP_SIZE/2 to +MAP_SIZE/2)
-const MAP_SIZE := 1200.0
+## Map size (ground covers -MAP_SIZE/2 to +MAP_SIZE/2) - DOUBLED for larger city
+const MAP_SIZE := 2400.0
 
-## Factory positions (sides of the map - doubled from original)
+## Factory positions (sides of the map - doubled for larger map)
 const FACTORY_POSITIONS := {
-	1: Vector3(0, 0, -500),     # North (Aether Swarm)
-	2: Vector3(500, 0, 0),      # East (OptiForge Legion)
-	3: Vector3(0, 0, 500),      # South (Dynapods Vanguard)
-	4: Vector3(-500, 0, 0),     # West (LogiBots Colossus)
+	1: Vector3(0, 0, -1000),    # North (Aether Swarm)
+	2: Vector3(1000, 0, 0),     # East (OptiForge Legion)
+	3: Vector3(0, 0, 1000),     # South (Dynapods Vanguard)
+	4: Vector3(-1000, 0, 0),    # West (LogiBots Colossus)
 }
 
 ## Camera starting angles for each faction (looking toward map center)
@@ -856,6 +982,32 @@ func _setup_faction_camera(faction_id: int) -> void:
 		camera.look_at(_camera_look_at, Vector3.UP)
 
 		print("Camera positioned for faction %d at %s, looking at %s" % [faction_id, camera.global_position, _camera_look_at])
+
+
+## Setup dynamic navigation mesh system for pathfinding with destructible terrain.
+func _setup_dynamic_navmesh() -> void:
+	# Create pathfinding bridge for batching updates
+	_pathfinding_bridge = VoxelPathfindingBridge.new()
+
+	# Connect voxel system to pathfinding bridge
+	if _voxel_system != null:
+		_pathfinding_bridge.connect_to_voxel_system(_voxel_system)
+
+	# Create dynamic navmesh manager
+	var navmesh_script := load("res://core/ai/pathfinding/dynamic_navmesh_manager.gd")
+	if navmesh_script != null:
+		_navmesh_manager = navmesh_script.new()
+		add_child(_navmesh_manager)
+
+		# Connect to voxel system and pathfinding bridge
+		if _voxel_system != null:
+			_navmesh_manager.connect_to_voxel_system(_voxel_system)
+		_navmesh_manager.connect_to_pathfinding_bridge(_pathfinding_bridge)
+
+		# Initialize navigation regions for the world (512x512 map)
+		_navmesh_manager.initialize_world_regions(Vector3(512, 10, 512))
+
+		print("[NavMesh] Dynamic navigation mesh enabled - terrain changes update pathfinding")
 
 
 func _setup_minimap() -> void:
@@ -1193,16 +1345,20 @@ func _update_selection_rings() -> void:
 
 
 ## Update stance visual indicators for selected player units.
+## PERFORMANCE OPTIMIZED: Uses O(1) dict lookup instead of O(n²) nested loops,
+## and uses cached meshes/materials instead of creating new ones per indicator.
 func _update_stance_indicators() -> void:
-	# Clean up indicators for units no longer selected
+	# PERFORMANCE: Build selected unit IDs set for O(1) lookup (instead of O(n) search)
+	_selected_unit_ids.clear()
+	for unit in _selected_units:
+		var uid: int = unit.get("id", -1)
+		if uid != -1 and unit.faction_id == _player_faction and not unit.is_dead:
+			_selected_unit_ids[uid] = true
+
+	# Clean up indicators for units no longer selected (O(1) lookup now)
 	var units_to_remove: Array[int] = []
 	for unit_id in _stance_indicators:
-		var found := false
-		for unit in _selected_units:
-			if unit.get("id", -1) == unit_id and unit.faction_id == _player_faction:
-				found = true
-				break
-		if not found:
+		if not _selected_unit_ids.has(unit_id):
 			var indicator: MeshInstance3D = _stance_indicators[unit_id]
 			if is_instance_valid(indicator):
 				indicator.queue_free()
@@ -1221,57 +1377,35 @@ func _update_stance_indicators() -> void:
 			continue
 
 		var stance: int = unit.get("stance", UnitStance.AGGRESSIVE)
-		var stance_color: Color = STANCE_COLORS.get(stance, Color.WHITE)
 
 		if _stance_indicators.has(unit_id):
-			# Update existing indicator
+			# Update existing indicator position
 			var indicator: MeshInstance3D = _stance_indicators[unit_id]
 			if is_instance_valid(indicator) and is_instance_valid(unit.mesh):
 				indicator.position = unit.mesh.position
 				indicator.position.y = unit.mesh.scale.y * 2.0 + 1.5  # Above unit
-				# Update color if stance changed
-				var mat: StandardMaterial3D = indicator.get_surface_override_material(0)
-				if mat and mat.albedo_color != stance_color:
-					mat.albedo_color = stance_color
-					mat.emission = stance_color
+				# Update mesh if stance changed (use cached mesh)
+				var cached_mesh: Mesh = _stance_meshes.get(stance)
+				if cached_mesh and indicator.mesh != cached_mesh:
+					indicator.mesh = cached_mesh
+					# Switch to cached material for new stance
+					var cached_mat: StandardMaterial3D = _stance_materials.get(stance)
+					if cached_mat:
+						indicator.set_surface_override_material(0, cached_mat)
 		else:
-			# Create new indicator
+			# Create new indicator using CACHED meshes and materials
 			var indicator := MeshInstance3D.new()
 			indicator.name = "StanceIndicator_%d" % unit_id
 
-			# Create mesh based on stance
-			match stance:
-				UnitStance.AGGRESSIVE:
-					# Triangle pointing up (aggressive)
-					var prism := PrismMesh.new()
-					prism.size = Vector3(0.6, 0.6, 0.3)
-					indicator.mesh = prism
-				UnitStance.DEFENSIVE:
-					# Box (defensive/shield)
-					var box := BoxMesh.new()
-					box.size = Vector3(0.5, 0.5, 0.2)
-					indicator.mesh = box
-				UnitStance.HOLD_POSITION:
-					# Cylinder (hold/anchor)
-					var cyl := CylinderMesh.new()
-					cyl.top_radius = 0.3
-					cyl.bottom_radius = 0.3
-					cyl.height = 0.4
-					indicator.mesh = cyl
-				_:
-					var sphere := SphereMesh.new()
-					sphere.radius = 0.25
-					sphere.height = 0.5
-					indicator.mesh = sphere
+			# Use cached mesh (or fallback to aggressive if not found)
+			var cached_mesh: Mesh = _stance_meshes.get(stance, _stance_meshes.get(UnitStance.AGGRESSIVE))
+			if cached_mesh:
+				indicator.mesh = cached_mesh
 
-			# Material
-			var mat := StandardMaterial3D.new()
-			mat.albedo_color = stance_color
-			mat.emission_enabled = true
-			mat.emission = stance_color
-			mat.emission_energy_multiplier = 2.0
-			mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-			indicator.set_surface_override_material(0, mat)
+			# Use cached material (or fallback to aggressive if not found)
+			var cached_mat: StandardMaterial3D = _stance_materials.get(stance, _stance_materials.get(UnitStance.AGGRESSIVE))
+			if cached_mat:
+				indicator.set_surface_override_material(0, cached_mat)
 
 			# Position
 			if is_instance_valid(unit.mesh):
@@ -1280,6 +1414,36 @@ func _update_stance_indicators() -> void:
 
 			_effects_container.add_child(indicator)
 			_stance_indicators[unit_id] = indicator
+
+
+## PERFORMANCE: Initialize cached stance indicator meshes and materials.
+## This is called once at startup to avoid per-frame allocations.
+func _initialize_stance_indicator_cache() -> void:
+	# Pre-create meshes for each stance type
+	var prism := PrismMesh.new()
+	prism.size = Vector3(0.6, 0.6, 0.3)
+	_stance_meshes[UnitStance.AGGRESSIVE] = prism
+
+	var box := BoxMesh.new()
+	box.size = Vector3(0.5, 0.5, 0.2)
+	_stance_meshes[UnitStance.DEFENSIVE] = box
+
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.3
+	cyl.bottom_radius = 0.3
+	cyl.height = 0.4
+	_stance_meshes[UnitStance.HOLD_POSITION] = cyl
+
+	# Pre-create materials for each stance color
+	for stance in STANCE_COLORS:
+		var color: Color = STANCE_COLORS[stance]
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = color
+		mat.emission_enabled = true
+		mat.emission = color
+		mat.emission_energy_multiplier = 2.0
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_stance_materials[stance] = mat
 
 
 ## Update veterancy star indicators above veteran units.
@@ -1374,7 +1538,14 @@ func _setup_audio() -> void:
 	# Initialize AudioManager for advanced audio features
 	_audio_manager = AudioManager.new()
 	_audio_manager.initialize(get_tree())
+
+	# Initialize battle intensity tracker for dynamic music
+	_battle_intensity_tracker = BattleIntensityTracker.new()
+	_battle_intensity_tracker.combat_started.connect(_on_combat_started)
+	_battle_intensity_tracker.combat_ended.connect(_on_combat_ended)
+	_battle_intensity_tracker.intensity_spike.connect(_on_intensity_spike)
 	print("  AudioManager: OK (dynamic music, UI sounds)")
+	print("  BattleIntensityTracker: OK (combat → music intensity)")
 
 
 ## Setup selection box UI overlay.
@@ -1683,9 +1854,9 @@ func _create_faction_info_panel() -> void:
 	cards_container.add_theme_constant_override("separation", 20)
 	_faction_info_panel.add_child(cards_container)
 
-	# Create character sheet card for each unit type
-	for unit_type in ["scout", "soldier", "tank", "harvester"]:
-		var card := _create_unit_character_card(unit_type)
+	# Create character sheet card for each unit weight class (uses faction-specific templates)
+	for weight_class in ["light", "medium", "heavy", "harvester"]:
+		var card := _create_unit_character_card(weight_class)
 		cards_container.add_child(card)
 
 	# Instructions at bottom
@@ -1929,7 +2100,31 @@ func _create_unit_character_card(unit_type: String) -> Control:
 	# Store unit type in card metadata
 	card.set_meta("unit_type", unit_type)
 
+	# Make card clickable for detailed spec view
+	card.mouse_filter = Control.MOUSE_FILTER_STOP
+	card.gui_input.connect(_on_unit_card_clicked.bind(unit_type))
+
+	# Add hover effect
+	card.mouse_entered.connect(_on_unit_card_hover.bind(card, true))
+	card.mouse_exited.connect(_on_unit_card_hover.bind(card, false))
+
 	return card
+
+
+## Handle unit card hover effect.
+func _on_unit_card_hover(card: PanelContainer, is_hovered: bool) -> void:
+	var style: StyleBoxFlat = card.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+	if is_hovered:
+		style.border_color = style.border_color.lightened(0.3)
+		style.bg_color = style.bg_color.lightened(0.1)
+	card.add_theme_stylebox_override("panel", style)
+
+
+## Handle unit card click to show detailed spec popup.
+func _on_unit_card_clicked(event: InputEvent, weight_class: String) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_play_ui_sound("click")
+		_show_unit_spec_popup(weight_class)
 
 
 ## Add a stat row to the stats container.
@@ -1981,6 +2176,938 @@ func _add_stat_row(container: VBoxContainer, label: String, stat_key: String, ic
 	container.add_child(row)
 
 
+## Show the unit spec popup with detailed blueprint view.
+func _show_unit_spec_popup(weight_class: String) -> void:
+	_unit_spec_current_weight_class = weight_class
+	_unit_spec_current_template = _get_faction_template_for_class(_player_faction, weight_class)
+
+	if _unit_spec_popup == null:
+		_create_unit_spec_popup()
+
+	_update_unit_spec_content()
+	_unit_spec_popup.visible = true
+	_unit_spec_visible = true
+
+	# Start combat preview simulation
+	_start_combat_preview()
+
+
+## Hide the unit spec popup.
+func _hide_unit_spec_popup() -> void:
+	if _unit_spec_popup:
+		_unit_spec_popup.visible = false
+	_unit_spec_visible = false
+	_stop_combat_preview()
+
+
+## Create the unit spec popup with blueprint styling.
+func _create_unit_spec_popup() -> void:
+	var ui_layer: CanvasLayer = get_node_or_null("UI")
+	if not ui_layer:
+		return
+
+	_unit_spec_popup = Control.new()
+	_unit_spec_popup.name = "UnitSpecPopup"
+	_unit_spec_popup.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_unit_spec_popup.mouse_filter = Control.MOUSE_FILTER_STOP
+	ui_layer.add_child(_unit_spec_popup)
+
+	# Dark overlay with slight transparency
+	var overlay := ColorRect.new()
+	overlay.name = "Overlay"
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.color = Color(0.01, 0.02, 0.04, 0.95)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	overlay.gui_input.connect(_on_spec_overlay_click)
+	_unit_spec_popup.add_child(overlay)
+
+	# Blueprint grid background
+	_add_blueprint_grid(_unit_spec_popup)
+
+	# Main content panel - centered
+	var main_panel := PanelContainer.new()
+	main_panel.name = "MainPanel"
+	main_panel.set_anchors_preset(Control.PRESET_CENTER)
+	main_panel.position = Vector2(-550, -320)
+	main_panel.size = Vector2(1100, 640)
+
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.02, 0.04, 0.08, 0.98)
+	panel_style.border_color = Color(0.15, 0.4, 0.6, 0.9)
+	panel_style.set_border_width_all(3)
+	panel_style.set_corner_radius_all(4)
+	panel_style.set_content_margin_all(20)
+	main_panel.add_theme_stylebox_override("panel", panel_style)
+	_unit_spec_popup.add_child(main_panel)
+
+	# Main horizontal split
+	var main_hbox := HBoxContainer.new()
+	main_hbox.add_theme_constant_override("separation", 30)
+	main_panel.add_child(main_hbox)
+
+	# Left side - Large model viewport
+	var left_panel := _create_spec_model_panel()
+	main_hbox.add_child(left_panel)
+
+	# Right side - Info and combat preview
+	var right_panel := _create_spec_info_panel()
+	main_hbox.add_child(right_panel)
+
+	# Close button (X in corner)
+	var close_btn := Button.new()
+	close_btn.name = "CloseButton"
+	close_btn.text = "✕"
+	close_btn.add_theme_font_size_override("font_size", 24)
+	close_btn.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	close_btn.position = Vector2(-60, 10)
+	close_btn.size = Vector2(50, 50)
+	close_btn.pressed.connect(_hide_unit_spec_popup)
+
+	var close_style := StyleBoxFlat.new()
+	close_style.bg_color = Color(0.2, 0.1, 0.1, 0.8)
+	close_style.border_color = Color(0.6, 0.2, 0.2)
+	close_style.set_border_width_all(2)
+	close_style.set_corner_radius_all(4)
+	close_btn.add_theme_stylebox_override("normal", close_style)
+	main_panel.add_child(close_btn)
+
+	# Instructions at bottom
+	var hint := Label.new()
+	hint.text = "ESC or click outside to close"
+	hint.add_theme_font_size_override("font_size", 14)
+	hint.add_theme_color_override("font_color", Color(0.4, 0.5, 0.6))
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	hint.position.y = -30
+	main_panel.add_child(hint)
+
+
+## Add blueprint grid background.
+func _add_blueprint_grid(parent: Control) -> void:
+	var grid := Control.new()
+	grid.name = "BlueprintGrid"
+	grid.set_anchors_preset(Control.PRESET_FULL_RECT)
+	grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(grid)
+
+	# Blueprint blue color scheme
+	var line_color := Color(0.05, 0.15, 0.25, 0.3)
+	var major_line_color := Color(0.08, 0.2, 0.35, 0.4)
+	var spacing := 40
+	var major_spacing := 200
+
+	# Draw grid lines
+	for i in range(0, 50):
+		var is_major := (i * spacing) % major_spacing == 0
+		var color: Color = major_line_color if is_major else line_color
+		var width: float = 2.0 if is_major else 1.0
+
+		# Horizontal
+		var h_line := ColorRect.new()
+		h_line.color = color
+		h_line.set_anchors_preset(Control.PRESET_TOP_WIDE)
+		h_line.position.y = i * spacing
+		h_line.size = Vector2(2000, width)
+		grid.add_child(h_line)
+
+		# Vertical
+		var v_line := ColorRect.new()
+		v_line.color = color
+		v_line.set_anchors_preset(Control.PRESET_LEFT_WIDE)
+		v_line.position.x = i * spacing
+		v_line.size = Vector2(width, 1200)
+		grid.add_child(v_line)
+
+	# Corner markers (technical drawing style)
+	_add_corner_markers(grid)
+
+
+## Add technical corner markers.
+func _add_corner_markers(parent: Control) -> void:
+	var marker_color := Color(0.2, 0.5, 0.7, 0.6)
+	var positions := [
+		Vector2(50, 50), Vector2(1870, 50),
+		Vector2(50, 1030), Vector2(1870, 1030)
+	]
+
+	for pos in positions:
+		# Horizontal line
+		var h_mark := ColorRect.new()
+		h_mark.color = marker_color
+		h_mark.position = pos
+		h_mark.size = Vector2(30, 2)
+		parent.add_child(h_mark)
+
+		# Vertical line
+		var v_mark := ColorRect.new()
+		v_mark.color = marker_color
+		v_mark.position = pos
+		v_mark.size = Vector2(2, 30)
+		parent.add_child(v_mark)
+
+
+## Create the left panel with large model viewport.
+func _create_spec_model_panel() -> Control:
+	var panel := VBoxContainer.new()
+	panel.name = "ModelPanel"
+	panel.custom_minimum_size = Vector2(450, 580)
+	panel.add_theme_constant_override("separation", 10)
+
+	# Unit designation header
+	var header := Label.new()
+	header.name = "UnitDesignation"
+	header.text = "UNIT DESIGNATION"
+	header.add_theme_font_size_override("font_size", 12)
+	header.add_theme_color_override("font_color", Color(0.4, 0.6, 0.8))
+	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	panel.add_child(header)
+
+	# Unit name (large)
+	var name_label := Label.new()
+	name_label.name = "UnitName"
+	name_label.text = "UNIT NAME"
+	name_label.add_theme_font_size_override("font_size", 32)
+	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	panel.add_child(name_label)
+
+	# Classification badge
+	var class_badge := _create_classification_badge()
+	panel.add_child(class_badge)
+
+	# Large 3D viewport
+	var viewport_frame := PanelContainer.new()
+	viewport_frame.name = "ViewportFrame"
+	viewport_frame.custom_minimum_size = Vector2(420, 320)
+
+	var frame_style := StyleBoxFlat.new()
+	frame_style.bg_color = Color(0.01, 0.02, 0.04, 0.9)
+	frame_style.border_color = Color(0.1, 0.3, 0.5, 0.8)
+	frame_style.set_border_width_all(2)
+	frame_style.set_corner_radius_all(2)
+	viewport_frame.add_theme_stylebox_override("panel", frame_style)
+	panel.add_child(viewport_frame)
+
+	var viewport_container := SubViewportContainer.new()
+	viewport_container.name = "SpecViewportContainer"
+	viewport_container.set_anchors_preset(Control.PRESET_FULL_RECT)
+	viewport_container.stretch = true
+	viewport_frame.add_child(viewport_container)
+
+	_unit_spec_viewport = SubViewport.new()
+	_unit_spec_viewport.name = "SpecModelViewport"
+	_unit_spec_viewport.size = Vector2i(420, 320)
+	_unit_spec_viewport.transparent_bg = true
+	_unit_spec_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	_unit_spec_viewport.own_world_3d = true
+	viewport_container.add_child(_unit_spec_viewport)
+
+	# Camera
+	var cam := Camera3D.new()
+	cam.name = "SpecCamera"
+	cam.position = Vector3(0, 3, 8)
+	cam.fov = 35
+	_unit_spec_viewport.add_child(cam)
+	cam.look_at(Vector3(0, 1.5, 0), Vector3.UP)
+
+	# Lighting - dramatic
+	var key_light := DirectionalLight3D.new()
+	key_light.rotation_degrees = Vector3(-35, 45, 0)
+	key_light.light_energy = 1.8
+	key_light.light_color = Color(0.9, 0.95, 1.0)
+	_unit_spec_viewport.add_child(key_light)
+
+	var fill_light := DirectionalLight3D.new()
+	fill_light.rotation_degrees = Vector3(20, -120, 0)
+	fill_light.light_energy = 0.4
+	fill_light.light_color = Color(0.6, 0.7, 0.9)
+	_unit_spec_viewport.add_child(fill_light)
+
+	var rim_light := DirectionalLight3D.new()
+	rim_light.rotation_degrees = Vector3(-10, 180, 0)
+	rim_light.light_energy = 0.6
+	rim_light.light_color = Color(0.4, 0.6, 0.8)
+	_unit_spec_viewport.add_child(rim_light)
+
+	# Model container
+	_unit_spec_model_container = Node3D.new()
+	_unit_spec_model_container.name = "SpecModelContainer"
+	_unit_spec_viewport.add_child(_unit_spec_model_container)
+
+	# Technical specs below viewport
+	var tech_specs := _create_technical_specs_panel()
+	panel.add_child(tech_specs)
+
+	return panel
+
+
+## Create classification badge.
+func _create_classification_badge() -> Control:
+	var container := CenterContainer.new()
+	container.name = "ClassificationBadge"
+
+	var badge := PanelContainer.new()
+	var badge_style := StyleBoxFlat.new()
+	badge_style.bg_color = Color(0.1, 0.2, 0.3, 0.8)
+	badge_style.border_color = Color(0.2, 0.4, 0.6)
+	badge_style.set_border_width_all(1)
+	badge_style.set_corner_radius_all(2)
+	badge_style.set_content_margin_all(6)
+	badge.add_theme_stylebox_override("panel", badge_style)
+	container.add_child(badge)
+
+	var badge_label := Label.new()
+	badge_label.name = "ClassLabel"
+	badge_label.text = "LIGHT COMBAT UNIT"
+	badge_label.add_theme_font_size_override("font_size", 11)
+	badge_label.add_theme_color_override("font_color", Color(0.6, 0.8, 1.0))
+	badge.add_child(badge_label)
+
+	return container
+
+
+## Create technical specs mini-panel.
+func _create_technical_specs_panel() -> Control:
+	var panel := VBoxContainer.new()
+	panel.name = "TechSpecs"
+	panel.add_theme_constant_override("separation", 4)
+
+	# Header
+	var header := Label.new()
+	header.text = "─── TECHNICAL SPECIFICATIONS ───"
+	header.add_theme_font_size_override("font_size", 10)
+	header.add_theme_color_override("font_color", Color(0.3, 0.5, 0.6))
+	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	panel.add_child(header)
+
+	# Specs grid
+	var grid := GridContainer.new()
+	grid.name = "SpecsGrid"
+	grid.columns = 4
+	grid.add_theme_constant_override("h_separation", 15)
+	grid.add_theme_constant_override("v_separation", 2)
+	panel.add_child(grid)
+
+	# Will be populated with actual specs
+	var spec_items := [
+		["MASS", "---", "ARMOR", "---"],
+		["PWR", "---", "COST", "---"]
+	]
+
+	for row in spec_items:
+		for i in range(0, row.size(), 2):
+			var label := Label.new()
+			label.name = "Spec_" + row[i]
+			label.text = row[i] + ":"
+			label.add_theme_font_size_override("font_size", 10)
+			label.add_theme_color_override("font_color", Color(0.4, 0.5, 0.6))
+			grid.add_child(label)
+
+			var value := Label.new()
+			value.name = "SpecVal_" + row[i]
+			value.text = row[i + 1]
+			value.add_theme_font_size_override("font_size", 10)
+			value.add_theme_color_override("font_color", Color(0.7, 0.8, 0.9))
+			grid.add_child(value)
+
+	return panel
+
+
+## Create the right panel with stats and combat preview.
+func _create_spec_info_panel() -> Control:
+	var panel := VBoxContainer.new()
+	panel.name = "InfoPanel"
+	panel.custom_minimum_size = Vector2(550, 580)
+	panel.add_theme_constant_override("separation", 15)
+
+	# Faction badge
+	var faction_header := _create_faction_header()
+	panel.add_child(faction_header)
+
+	# Description panel
+	var desc_panel := _create_description_panel()
+	panel.add_child(desc_panel)
+
+	# Stats panel (large detailed version)
+	var stats_panel := _create_detailed_stats_panel()
+	panel.add_child(stats_panel)
+
+	# Abilities panel
+	var abilities_panel := _create_abilities_panel()
+	panel.add_child(abilities_panel)
+
+	# Combat preview (small action window)
+	var combat_panel := _create_combat_preview_panel()
+	panel.add_child(combat_panel)
+
+	return panel
+
+
+## Create faction header badge.
+func _create_faction_header() -> Control:
+	var container := HBoxContainer.new()
+	container.name = "FactionHeader"
+	container.add_theme_constant_override("separation", 10)
+
+	var faction_icon := Label.new()
+	faction_icon.name = "FactionIcon"
+	faction_icon.text = "◆"
+	faction_icon.add_theme_font_size_override("font_size", 20)
+	container.add_child(faction_icon)
+
+	var faction_name := Label.new()
+	faction_name.name = "FactionName"
+	faction_name.text = "FACTION NAME"
+	faction_name.add_theme_font_size_override("font_size", 16)
+	container.add_child(faction_name)
+
+	return container
+
+
+## Create description panel.
+func _create_description_panel() -> Control:
+	var panel := PanelContainer.new()
+	panel.name = "DescriptionPanel"
+
+	var desc_style := StyleBoxFlat.new()
+	desc_style.bg_color = Color(0.03, 0.05, 0.08, 0.8)
+	desc_style.border_color = Color(0.1, 0.2, 0.3, 0.6)
+	desc_style.set_border_width_all(1)
+	desc_style.set_content_margin_all(12)
+	panel.add_theme_stylebox_override("panel", desc_style)
+
+	var desc_label := Label.new()
+	desc_label.name = "Description"
+	desc_label.text = "Unit description goes here..."
+	desc_label.add_theme_font_size_override("font_size", 13)
+	desc_label.add_theme_color_override("font_color", Color(0.7, 0.8, 0.9))
+	desc_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc_label.custom_minimum_size = Vector2(520, 60)
+	panel.add_child(desc_label)
+
+	return panel
+
+
+## Create detailed stats panel.
+func _create_detailed_stats_panel() -> Control:
+	var panel := VBoxContainer.new()
+	panel.name = "DetailedStatsPanel"
+	panel.add_theme_constant_override("separation", 6)
+
+	# Header
+	var header := Label.new()
+	header.text = "━━━ COMBAT STATISTICS ━━━"
+	header.add_theme_font_size_override("font_size", 12)
+	header.add_theme_color_override("font_color", Color(0.5, 0.7, 0.9))
+	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	panel.add_child(header)
+
+	# Stats in two columns
+	var columns := HBoxContainer.new()
+	columns.add_theme_constant_override("separation", 40)
+	panel.add_child(columns)
+
+	var left_stats := VBoxContainer.new()
+	left_stats.name = "LeftStats"
+	left_stats.add_theme_constant_override("separation", 4)
+	columns.add_child(left_stats)
+
+	var right_stats := VBoxContainer.new()
+	right_stats.name = "RightStats"
+	right_stats.add_theme_constant_override("separation", 4)
+	columns.add_child(right_stats)
+
+	# Add detailed stat rows
+	_add_detailed_stat_row(left_stats, "HEALTH", "health", Color(0.2, 0.8, 0.3))
+	_add_detailed_stat_row(left_stats, "DAMAGE", "damage", Color(1.0, 0.4, 0.3))
+	_add_detailed_stat_row(left_stats, "DPS", "dps", Color(1.0, 0.6, 0.2))
+	_add_detailed_stat_row(right_stats, "SPEED", "speed", Color(0.3, 0.7, 1.0))
+	_add_detailed_stat_row(right_stats, "RANGE", "range", Color(0.8, 0.5, 1.0))
+	_add_detailed_stat_row(right_stats, "ATTACK RATE", "attack_speed", Color(0.9, 0.9, 0.3))
+
+	return panel
+
+
+## Add a detailed stat row with large bar.
+func _add_detailed_stat_row(container: VBoxContainer, label: String, stat_key: String, color: Color) -> void:
+	var row := VBoxContainer.new()
+	row.name = "DetailedStat_" + stat_key
+	row.add_theme_constant_override("separation", 2)
+
+	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", 10)
+
+	var name_label := Label.new()
+	name_label.text = label
+	name_label.add_theme_font_size_override("font_size", 11)
+	name_label.add_theme_color_override("font_color", Color(0.5, 0.6, 0.7))
+	name_label.custom_minimum_size = Vector2(100, 16)
+	header.add_child(name_label)
+
+	var value_label := Label.new()
+	value_label.name = "Value"
+	value_label.text = "0"
+	value_label.add_theme_font_size_override("font_size", 14)
+	value_label.add_theme_color_override("font_color", color)
+	header.add_child(value_label)
+
+	row.add_child(header)
+
+	# Large bar
+	var bar_bg := ColorRect.new()
+	bar_bg.name = "BarBg"
+	bar_bg.custom_minimum_size = Vector2(200, 10)
+	bar_bg.color = Color(0.08, 0.1, 0.15, 0.9)
+	row.add_child(bar_bg)
+
+	var bar_fill := ColorRect.new()
+	bar_fill.name = "BarFill"
+	bar_fill.size = Vector2(0, 10)
+	bar_fill.color = color
+	bar_bg.add_child(bar_fill)
+
+	container.add_child(row)
+
+
+## Create abilities panel.
+func _create_abilities_panel() -> Control:
+	var panel := VBoxContainer.new()
+	panel.name = "AbilitiesPanel"
+	panel.add_theme_constant_override("separation", 6)
+
+	# Header
+	var header := Label.new()
+	header.text = "━━━ SPECIAL ABILITIES ━━━"
+	header.add_theme_font_size_override("font_size", 12)
+	header.add_theme_color_override("font_color", Color(0.5, 0.7, 0.9))
+	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	panel.add_child(header)
+
+	# Abilities container
+	var abilities_box := HBoxContainer.new()
+	abilities_box.name = "AbilitiesBox"
+	abilities_box.add_theme_constant_override("separation", 10)
+	panel.add_child(abilities_box)
+
+	return panel
+
+
+## Create combat preview panel.
+func _create_combat_preview_panel() -> Control:
+	var panel := VBoxContainer.new()
+	panel.name = "CombatPreviewPanel"
+	panel.add_theme_constant_override("separation", 6)
+
+	# Header
+	var header := Label.new()
+	header.text = "━━━ COMBAT PREVIEW ━━━"
+	header.add_theme_font_size_override("font_size", 12)
+	header.add_theme_color_override("font_color", Color(0.5, 0.7, 0.9))
+	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	panel.add_child(header)
+
+	# Combat viewport frame
+	var frame := PanelContainer.new()
+	frame.name = "CombatFrame"
+	frame.custom_minimum_size = Vector2(520, 100)
+
+	var frame_style := StyleBoxFlat.new()
+	frame_style.bg_color = Color(0.02, 0.03, 0.05, 0.9)
+	frame_style.border_color = Color(0.15, 0.25, 0.35, 0.8)
+	frame_style.set_border_width_all(2)
+	frame_style.set_corner_radius_all(2)
+	frame.add_theme_stylebox_override("panel", frame_style)
+	panel.add_child(frame)
+
+	var viewport_container := SubViewportContainer.new()
+	viewport_container.name = "CombatViewportContainer"
+	viewport_container.set_anchors_preset(Control.PRESET_FULL_RECT)
+	viewport_container.stretch = true
+	frame.add_child(viewport_container)
+
+	_unit_spec_combat_viewport = SubViewport.new()
+	_unit_spec_combat_viewport.name = "CombatViewport"
+	_unit_spec_combat_viewport.size = Vector2i(520, 100)
+	_unit_spec_combat_viewport.transparent_bg = false
+	_unit_spec_combat_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	_unit_spec_combat_viewport.own_world_3d = true
+	viewport_container.add_child(_unit_spec_combat_viewport)
+
+	# Camera for combat preview (side view)
+	var cam := Camera3D.new()
+	cam.name = "CombatCamera"
+	cam.position = Vector3(0, 5, 12)
+	cam.fov = 50
+	_unit_spec_combat_viewport.add_child(cam)
+	cam.look_at(Vector3(0, 1, 0), Vector3.UP)
+
+	# Lighting
+	var light := DirectionalLight3D.new()
+	light.rotation_degrees = Vector3(-45, 30, 0)
+	light.light_energy = 1.5
+	_unit_spec_combat_viewport.add_child(light)
+
+	# Ground plane
+	var ground := MeshInstance3D.new()
+	ground.name = "Ground"
+	var ground_mesh := PlaneMesh.new()
+	ground_mesh.size = Vector2(30, 20)
+	ground.mesh = ground_mesh
+	var ground_mat := StandardMaterial3D.new()
+	ground_mat.albedo_color = Color(0.05, 0.08, 0.1)
+	ground.material_override = ground_mat
+	_unit_spec_combat_viewport.add_child(ground)
+
+	return panel
+
+
+## Handle click on overlay to close popup.
+func _on_spec_overlay_click(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_hide_unit_spec_popup()
+
+
+## Update the unit spec popup content.
+func _update_unit_spec_content() -> void:
+	if _unit_spec_popup == null:
+		return
+
+	var main_panel: PanelContainer = _unit_spec_popup.get_node_or_null("MainPanel")
+	if main_panel == null:
+		return
+
+	var faction_color: Color = FACTION_INFO.get(_player_faction, {}).get("color", Color.WHITE)
+	var faction_name: String = FACTION_INFO.get(_player_faction, {}).get("name", "Unknown")
+
+	# Update faction header
+	var faction_header: HBoxContainer = main_panel.get_node_or_null("HBoxContainer/InfoPanel/FactionHeader")
+	if faction_header:
+		var icon: Label = faction_header.get_node_or_null("FactionIcon")
+		if icon:
+			icon.add_theme_color_override("font_color", faction_color)
+		var name_lbl: Label = faction_header.get_node_or_null("FactionName")
+		if name_lbl:
+			name_lbl.text = faction_name.to_upper()
+			name_lbl.add_theme_color_override("font_color", faction_color)
+
+	# Get template info
+	var unit_name := _get_weight_class_display_name(_unit_spec_current_weight_class)
+	var description := ""
+	var abilities: Array = []
+	var stats: Dictionary = {}
+
+	if _unit_spec_current_template != null:
+		unit_name = _unit_spec_current_template.display_name
+		description = _unit_spec_current_template.description
+		abilities = _unit_spec_current_template.abilities
+		stats = _unit_spec_current_template.base_stats
+
+	# Update unit name
+	var model_panel: VBoxContainer = main_panel.get_node_or_null("HBoxContainer/ModelPanel")
+	if model_panel:
+		var name_label: Label = model_panel.get_node_or_null("UnitName")
+		if name_label:
+			name_label.text = unit_name.to_upper()
+			name_label.add_theme_color_override("font_color", faction_color)
+
+		# Update classification badge
+		var badge_container: CenterContainer = model_panel.get_node_or_null("ClassificationBadge")
+		if badge_container:
+			var badge: PanelContainer = badge_container.get_child(0) as PanelContainer
+			if badge:
+				var class_label: Label = badge.get_node_or_null("ClassLabel")
+				if class_label:
+					var class_text := "COMBAT UNIT"
+					match _unit_spec_current_weight_class:
+						"light": class_text = "LIGHT ASSAULT UNIT"
+						"medium": class_text = "MEDIUM COMBAT UNIT"
+						"heavy": class_text = "HEAVY SIEGE UNIT"
+						"harvester": class_text = "RESOURCE HARVESTER"
+					class_label.text = class_text
+
+		# Update technical specs
+		_update_technical_specs(model_panel, stats)
+
+	# Update description
+	var info_panel: VBoxContainer = main_panel.get_node_or_null("HBoxContainer/InfoPanel")
+	if info_panel:
+		var desc_panel: PanelContainer = info_panel.get_node_or_null("DescriptionPanel")
+		if desc_panel:
+			var desc_label: Label = desc_panel.get_node_or_null("Description")
+			if desc_label:
+				desc_label.text = description if description != "" else "A specialized combat unit designed for battlefield dominance."
+
+		# Update detailed stats
+		_update_detailed_stats(info_panel, stats)
+
+		# Update abilities
+		_update_abilities_display(info_panel, abilities, faction_color)
+
+	# Update 3D model
+	_update_spec_model(faction_color)
+
+
+## Update technical specs display.
+func _update_technical_specs(panel: VBoxContainer, stats: Dictionary) -> void:
+	var tech_specs: VBoxContainer = panel.get_node_or_null("TechSpecs")
+	if tech_specs == null:
+		return
+
+	var grid: GridContainer = tech_specs.get_node_or_null("SpecsGrid")
+	if grid == null:
+		return
+
+	# Get values from stats
+	var mass: float = stats.get("mass", stats.get("max_health", 100.0))
+	var armor: float = stats.get("armor", 0.0) * 100  # Convert to percentage
+	var power: float = stats.get("base_damage", 10.0) * stats.get("attack_speed", 1.0)
+	var cost: float = 0.0
+
+	if _unit_spec_current_template != null:
+		var prod_cost: Dictionary = _unit_spec_current_template.production_cost
+		cost = prod_cost.get("ree", 50.0)
+
+	# Update values
+	var mass_val: Label = grid.get_node_or_null("SpecVal_MASS")
+	if mass_val:
+		mass_val.text = "%d kg" % int(mass)
+
+	var armor_val: Label = grid.get_node_or_null("SpecVal_ARMOR")
+	if armor_val:
+		armor_val.text = "%.0f%%" % armor
+
+	var pwr_val: Label = grid.get_node_or_null("SpecVal_PWR")
+	if pwr_val:
+		pwr_val.text = "%.1f" % power
+
+	var cost_val: Label = grid.get_node_or_null("SpecVal_COST")
+	if cost_val:
+		cost_val.text = "%d REE" % int(cost)
+
+
+## Update detailed stats bars.
+func _update_detailed_stats(panel: VBoxContainer, stats: Dictionary) -> void:
+	var stats_panel: VBoxContainer = panel.get_node_or_null("DetailedStatsPanel")
+	if stats_panel == null:
+		return
+
+	# Get stats values
+	var health: float = stats.get("max_health", 100.0)
+	var damage: float = stats.get("base_damage", 10.0)
+	var speed: float = stats.get("max_speed", 10.0)
+	var attack_speed: float = stats.get("attack_speed", 1.0)
+	var range_val: float = stats.get("attack_range", 15.0)
+	var dps: float = damage * attack_speed
+
+	var stat_values := {
+		"health": {"value": health, "max": 400.0},
+		"damage": {"value": damage, "max": 100.0},
+		"dps": {"value": dps, "max": 100.0},
+		"speed": {"value": speed, "max": 25.0},
+		"range": {"value": range_val, "max": 50.0},
+		"attack_speed": {"value": attack_speed, "max": 3.0}
+	}
+
+	# Update both columns
+	for col_name in ["LeftStats", "RightStats"]:
+		var col: VBoxContainer = stats_panel.get_node_or_null("HBoxContainer/" + col_name)
+		if col == null:
+			continue
+
+		for child in col.get_children():
+			var stat_key: String = child.name.replace("DetailedStat_", "")
+			if not stat_values.has(stat_key):
+				continue
+
+			var data: Dictionary = stat_values[stat_key]
+			var value: float = data["value"]
+			var max_val: float = data["max"]
+
+			# Update value label
+			var header: HBoxContainer = child.get_node_or_null("HBoxContainer") as HBoxContainer
+			if header == null:
+				header = child.get_child(0) as HBoxContainer
+			if header:
+				var value_label: Label = header.get_node_or_null("Value")
+				if value_label:
+					if stat_key == "attack_speed":
+						value_label.text = "%.2f/s" % value
+					elif stat_key == "dps":
+						value_label.text = "%.1f" % value
+					else:
+						value_label.text = "%d" % int(value)
+
+			# Update bar
+			var bar_bg: ColorRect = child.get_node_or_null("BarBg")
+			if bar_bg:
+				var bar_fill: ColorRect = bar_bg.get_node_or_null("BarFill")
+				if bar_fill:
+					var fill_pct: float = clampf(value / max_val, 0.0, 1.0)
+					bar_fill.size.x = bar_bg.size.x * fill_pct
+
+
+## Update abilities display.
+func _update_abilities_display(panel: VBoxContainer, abilities: Array, faction_color: Color) -> void:
+	var abilities_panel: VBoxContainer = panel.get_node_or_null("AbilitiesPanel")
+	if abilities_panel == null:
+		return
+
+	var abilities_box: HBoxContainer = abilities_panel.get_node_or_null("AbilitiesBox")
+	if abilities_box == null:
+		return
+
+	# Clear existing ability badges
+	for child in abilities_box.get_children():
+		child.queue_free()
+
+	# Add ability badges
+	for ability_name in abilities:
+		if ability_name is String:
+			var badge := _create_ability_badge(ability_name, faction_color)
+			abilities_box.add_child(badge)
+
+
+## Create an ability badge.
+func _create_ability_badge(ability_name: String, color: Color) -> Control:
+	var badge := PanelContainer.new()
+	badge.name = "Ability_" + ability_name
+
+	var style := StyleBoxFlat.new()
+	style.bg_color = color.darkened(0.7)
+	style.border_color = color.darkened(0.3)
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(3)
+	style.set_content_margin_all(6)
+	badge.add_theme_stylebox_override("panel", style)
+
+	var label := Label.new()
+	label.text = ability_name.replace("_", " ").capitalize()
+	label.add_theme_font_size_override("font_size", 11)
+	label.add_theme_color_override("font_color", color.lightened(0.2))
+	badge.add_child(label)
+
+	return badge
+
+
+## Update the 3D model in the spec popup.
+func _update_spec_model(faction_color: Color) -> void:
+	if _unit_spec_model_container == null:
+		return
+
+	# Clear existing
+	for child in _unit_spec_model_container.get_children():
+		child.queue_free()
+
+	# Map weight class to bot type
+	var bot_type: String = "soldier"
+	match _unit_spec_current_weight_class:
+		"light": bot_type = "scout"
+		"medium": bot_type = "soldier"
+		"heavy": bot_type = "tank"
+		"harvester": bot_type = "harvester"
+
+	# Get type data
+	var type_data: Dictionary = UNIT_TYPES.get(bot_type, UNIT_TYPES["soldier"]).duplicate()
+
+	if _unit_spec_current_template != null:
+		var stats: Dictionary = _unit_spec_current_template.base_stats
+		var health: float = stats.get("max_health", 100.0)
+		var scale_factor := sqrt(health / 100.0)
+		type_data["size"] = Vector3(1.5, 2.0, 1.5) * scale_factor
+
+	# Create model
+	var bot := _create_procedural_bot(_player_faction, bot_type, type_data)
+	bot.position = Vector3(0, type_data.get("size", Vector3.ONE).y * 0.3, 0)
+	bot.scale = Vector3.ONE * 1.5
+	_unit_spec_model_container.add_child(bot)
+
+
+## Start combat preview simulation.
+func _start_combat_preview() -> void:
+	if _unit_spec_combat_viewport == null:
+		return
+
+	# Clear existing units
+	_stop_combat_preview()
+
+	# Create friendly unit (the showcased unit)
+	var friendly_pos := Vector3(-5, 0, 0)
+	var friendly := _create_combat_preview_unit(_player_faction, friendly_pos, true)
+	_unit_spec_combat_viewport.add_child(friendly["mesh"])
+	_unit_spec_combat_units.append(friendly)
+
+	# Create enemy unit
+	var enemy_faction := 2 if _player_faction != 2 else 1
+	var enemy_pos := Vector3(5, 0, 0)
+	var enemy := _create_combat_preview_unit(enemy_faction, enemy_pos, false)
+	_unit_spec_combat_viewport.add_child(enemy["mesh"])
+	_unit_spec_combat_units.append(enemy)
+
+
+## Create a unit for the combat preview.
+func _create_combat_preview_unit(faction_id: int, position: Vector3, is_friendly: bool) -> Dictionary:
+	var bot_type: String = "soldier"
+	if is_friendly:
+		match _unit_spec_current_weight_class:
+			"light": bot_type = "scout"
+			"medium": bot_type = "soldier"
+			"heavy": bot_type = "tank"
+			"harvester": bot_type = "harvester"
+
+	var type_data: Dictionary = UNIT_TYPES.get(bot_type, UNIT_TYPES["soldier"]).duplicate()
+	type_data["size"] = type_data.get("size", Vector3(1.5, 2.0, 1.5)) * 0.8
+
+	var mesh := _create_procedural_bot(faction_id, bot_type, type_data)
+	mesh.position = position
+	mesh.position.y = type_data.get("size", Vector3.ONE).y * 0.3
+
+	# Face each other
+	if is_friendly:
+		mesh.rotation.y = 0
+	else:
+		mesh.rotation.y = PI
+
+	return {
+		"mesh": mesh,
+		"faction_id": faction_id,
+		"is_friendly": is_friendly,
+		"attack_timer": randf() * 0.5,
+		"position": position
+	}
+
+
+## Stop combat preview simulation.
+func _stop_combat_preview() -> void:
+	for unit in _unit_spec_combat_units:
+		if unit.has("mesh") and is_instance_valid(unit["mesh"]):
+			unit["mesh"].queue_free()
+	_unit_spec_combat_units.clear()
+
+
+## Update combat preview animation.
+func _update_combat_preview(delta: float) -> void:
+	if not _unit_spec_visible or _unit_spec_combat_units.is_empty():
+		return
+
+	for unit in _unit_spec_combat_units:
+		if not unit.has("mesh") or not is_instance_valid(unit["mesh"]):
+			continue
+
+		# Simple attack animation
+		unit["attack_timer"] -= delta
+		if unit["attack_timer"] <= 0:
+			unit["attack_timer"] = randf_range(0.5, 1.5)
+
+			# Flash effect for "shooting"
+			var mesh: Node3D = unit["mesh"]
+			# Could add muzzle flash here
+
+	# Rotate spec model
+	if _unit_spec_model_container != null:
+		for child in _unit_spec_model_container.get_children():
+			if child is Node3D:
+				child.rotation.y += delta * 0.8
+
+
 ## Update the faction info display with current faction data.
 func _update_faction_info_display() -> void:
 	if _faction_info_panel == null:
@@ -2005,12 +3132,12 @@ func _update_faction_info_display() -> void:
 		if line:
 			line.color = faction_color
 
-	# Update unit cards
+	# Update unit cards with faction-specific templates
 	var cards_container: HBoxContainer = _faction_info_panel.get_node_or_null("UnitCardsContainer")
 	if cards_container == null:
 		return
 
-	var unit_types := ["scout", "soldier", "tank", "harvester"]
+	var weight_classes := ["light", "medium", "heavy", "harvester"]
 	var model_index := 0
 
 	for i in range(cards_container.get_child_count()):
@@ -2018,28 +3145,39 @@ func _update_faction_info_display() -> void:
 		if card == null:
 			continue
 
-		var unit_type: String = card.get_meta("unit_type", "")
-		if unit_type.is_empty():
+		var weight_class: String = card.get_meta("unit_type", "")
+		if weight_class.is_empty():
 			continue
+
+		# Get faction-specific template
+		var template: UnitTemplate = _get_faction_template_for_class(_player_faction, weight_class)
 
 		# Update card border color
 		var style: StyleBoxFlat = card.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
 		style.border_color = faction_color * 0.8
 		card.add_theme_stylebox_override("panel", style)
 
-		# Update title color
+		# Update title and role with template-specific info
 		var content: VBoxContainer = card.get_child(0) as VBoxContainer
 		if content:
 			var title: Label = content.get_node_or_null("UnitTitle")
 			if title:
 				title.add_theme_color_override("font_color", faction_color)
+				if template != null:
+					title.text = template.display_name
+				else:
+					title.text = _get_weight_class_display_name(weight_class)
 
-		# Update 3D model
-		_update_unit_model(model_index, unit_type, faction_color)
+			var role: Label = content.get_node_or_null("RoleDesc")
+			if role and template != null:
+				role.text = template.description
+
+		# Update 3D model with faction-specific template
+		_update_unit_model_from_template(model_index, weight_class, template, faction_color)
 		model_index += 1
 
-		# Update stats
-		_update_unit_stats(card, unit_type)
+		# Update stats from template
+		_update_unit_stats_from_template(card, weight_class, template)
 
 
 ## Update the 3D model in a viewport.
@@ -2148,6 +3286,167 @@ func _update_faction_info_models(delta: float) -> void:
 		for child in model_container.get_children():
 			if child is Node3D:
 				child.rotation.y += FACTION_INFO_ROTATE_SPEED * delta
+
+
+## Get faction-specific template for a weight class.
+func _get_faction_template_for_class(faction_id: int, weight_class: String) -> UnitTemplate:
+	var faction_templates: Dictionary = FACTION_UNIT_TEMPLATES.get(faction_id, {})
+	var template_id: String = faction_templates.get(weight_class, "")
+
+	# Special handling for harvester - use faction-specific harvester template
+	if weight_class == "harvester":
+		match faction_id:
+			1: template_id = "aether_swarm_nano_reaplet"
+			2: template_id = "optiforge_repair_drone"  # OptiForge uses repair drone as harvester
+			3: template_id = "dynapods_quadripper"
+			4: template_id = "logibots_bulkripper"
+			5: template_id = "human_soldier"  # Humans don't have harvesters
+
+	if template_id.is_empty() or UnitTemplateManager == null:
+		return null
+
+	return UnitTemplateManager.get_template(template_id)
+
+
+## Get display name for weight class (fallback when no template).
+func _get_weight_class_display_name(weight_class: String) -> String:
+	match weight_class:
+		"light": return "Scout"
+		"medium": return "Soldier"
+		"heavy": return "Heavy"
+		"harvester": return "Harvester"
+		_: return weight_class.capitalize()
+
+
+## Update 3D model from template data.
+func _update_unit_model_from_template(index: int, weight_class: String, template: UnitTemplate, faction_color: Color) -> void:
+	if index >= _faction_info_models.size():
+		return
+
+	var model_container: Node3D = _faction_info_models[index]
+	if model_container == null:
+		return
+
+	# Clear existing model
+	for child in model_container.get_children():
+		model_container.remove_child(child)
+		child.free()
+
+	# Map weight class to bot type for procedural generation
+	var bot_type: String = "soldier"
+	match weight_class:
+		"light": bot_type = "scout"
+		"medium": bot_type = "soldier"
+		"heavy": bot_type = "tank"
+		"harvester": bot_type = "harvester"
+
+	# Get type data - use template stats if available
+	var type_data: Dictionary = UNIT_TYPES.get(bot_type, UNIT_TYPES["soldier"]).duplicate()
+
+	# Override with template stats if available
+	if template != null:
+		var stats: Dictionary = template.base_stats
+		type_data["health"] = stats.get("max_health", type_data.get("health", 100))
+		type_data["damage"] = stats.get("base_damage", type_data.get("damage", 10))
+		type_data["speed_max"] = stats.get("max_speed", type_data.get("speed_max", 10))
+
+		# Scale based on template health
+		var health: float = stats.get("max_health", 100.0)
+		var scale_factor := sqrt(health / 100.0)
+		type_data["size"] = Vector3(1.5, 2.0, 1.5) * scale_factor
+
+	# Create procedural bot
+	var bot := _create_procedural_bot(_player_faction, bot_type, type_data)
+	bot.position = Vector3(0, type_data.get("size", Vector3.ONE).y * 0.5, 0)
+	bot.scale = Vector3.ONE * 1.2
+	model_container.add_child(bot)
+
+
+## Update unit stats from template.
+func _update_unit_stats_from_template(card: PanelContainer, weight_class: String, template: UnitTemplate) -> void:
+	var content: VBoxContainer = card.get_child(0) as VBoxContainer
+	if content == null:
+		return
+
+	var stats_container: VBoxContainer = content.get_node_or_null("StatsContainer")
+	if stats_container == null:
+		return
+
+	# Get stats from template or fallback
+	var health: float = 100.0
+	var damage: float = 10.0
+	var speed: float = 10.0
+	var attack_speed: float = 1.0
+	var range_val: float = 15.0
+
+	if template != null:
+		var stats: Dictionary = template.base_stats
+		health = stats.get("max_health", 100.0)
+		damage = stats.get("base_damage", 10.0)
+		speed = stats.get("max_speed", 10.0)
+		attack_speed = stats.get("attack_speed", 1.0)
+		range_val = stats.get("attack_range", 15.0)
+	else:
+		# Fallback to UNIT_TYPES with faction modifiers
+		var bot_type: String = "soldier"
+		match weight_class:
+			"light": bot_type = "scout"
+			"medium": bot_type = "soldier"
+			"heavy": bot_type = "tank"
+			"harvester": bot_type = "harvester"
+
+		var type_data: Dictionary = UNIT_TYPES.get(bot_type, {})
+		var faction_mods: Dictionary = FACTION_STAT_MODIFIERS.get(_player_faction, {})
+		health = type_data.get("health", 100) * faction_mods.get("health", 1.0)
+		damage = type_data.get("damage", 10) * faction_mods.get("damage", 1.0)
+		speed = type_data.get("speed_max", 10) * faction_mods.get("speed", 1.0)
+		attack_speed = type_data.get("attack_speed", 1.0) * faction_mods.get("attack_speed", 1.0)
+		range_val = type_data.get("range", 15) * faction_mods.get("range", 1.0)
+
+	var dps: float = damage * attack_speed
+	var faction_color: Color = FACTION_INFO.get(_player_faction, {}).get("color", Color.WHITE)
+
+	# Max values for bar scaling
+	var max_vals := {
+		"health": 300.0,
+		"damage": 60.0,
+		"speed": 20.0,
+		"attack_speed": 2.0,
+		"range": 25.0,
+		"dps": 80.0
+	}
+
+	var stat_values := {
+		"health": health,
+		"damage": damage,
+		"speed": speed,
+		"attack_speed": attack_speed,
+		"range": range_val,
+		"dps": dps
+	}
+
+	for stat_key in stat_values:
+		var row: HBoxContainer = stats_container.get_node_or_null("Stat_" + stat_key)
+		if row == null:
+			continue
+
+		var value: float = stat_values[stat_key]
+		var max_val: float = max_vals.get(stat_key, 100.0)
+
+		var value_label: Label = row.get_node_or_null("Value")
+		if value_label:
+			if stat_key == "attack_speed":
+				value_label.text = "%.2f" % value
+			else:
+				value_label.text = "%d" % int(value)
+
+		var bar_bg: ColorRect = row.get_node_or_null("BarBg")
+		if bar_bg:
+			var bar_fill: ColorRect = bar_bg.get_node_or_null("BarFill")
+			if bar_fill:
+				var fill_pct: float = clampf(value / max_val, 0.0, 1.0)
+				bar_fill.size.x = bar_bg.size.x * fill_pct
+				bar_fill.color = faction_color.lerp(Color.WHITE, 0.3)
 
 
 ## Setup unit tooltip panel for hover info.
@@ -2798,7 +4097,7 @@ func _setup_portrait_panel() -> void:
 	_portrait_panel = PanelContainer.new()
 	_portrait_panel.name = "PortraitPanel"
 	_portrait_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	_portrait_panel.offset_top = -80
+	_portrait_panel.offset_top = -95  # Increased height for task status
 	_portrait_panel.offset_bottom = -10
 	_portrait_panel.offset_left = -400
 	_portrait_panel.offset_right = 400
@@ -2881,7 +4180,7 @@ func _create_unit_portrait(unit: Dictionary, index: int) -> Control:
 
 	# Main container
 	var portrait := Control.new()
-	portrait.custom_minimum_size = Vector2(PORTRAIT_SIZE, PORTRAIT_SIZE + 12)
+	portrait.custom_minimum_size = Vector2(PORTRAIT_SIZE, PORTRAIT_SIZE + 12 + PORTRAIT_TASK_HEIGHT)
 	portrait.mouse_filter = Control.MOUSE_FILTER_STOP
 
 	# Click handler to select this unit
@@ -2943,6 +4242,16 @@ func _create_unit_portrait(unit: Dictionary, index: int) -> Control:
 		health_bar_fill.color = Color(0.3, 1.0, 0.3)
 	portrait.add_child(health_bar_fill)
 
+	# Task status label below health bar
+	var task_label := Label.new()
+	task_label.position = Vector2(0, PORTRAIT_SIZE + 10)
+	task_label.size = Vector2(PORTRAIT_SIZE, PORTRAIT_TASK_HEIGHT)
+	task_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	task_label.add_theme_font_size_override("font_size", 9)
+	task_label.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8, 0.9))
+	task_label.text = _get_unit_task_string(unit)
+	portrait.add_child(task_label)
+
 	# Veterancy stars (top right corner)
 	if vet_level > 0:
 		var stars := Label.new()
@@ -2986,6 +4295,62 @@ func _select_single_unit(unit: Dictionary) -> void:
 	_update_selection_rings()
 	_update_portrait_panel()
 	_update_selection_count_display()
+
+
+## Get a human-readable string for the unit's current task/status.
+func _get_unit_task_string(unit: Dictionary) -> String:
+	# Check if unit is dead
+	if unit.get("is_dead", false):
+		return "Dead"
+
+	# Check if harvester - has special states
+	if unit.get("is_harvester", false):
+		var state: int = unit.get("harvester_state", HarvesterState.IDLE)
+		match state:
+			HarvesterState.IDLE:
+				if unit.get("carried_ree", 0.0) > 0:
+					return "Cargo: %d" % int(unit.get("carried_ree", 0.0))
+				return "Idle"
+			HarvesterState.SEEKING_WRECKAGE:
+				return "Seeking"
+			HarvesterState.HARVESTING:
+				return "Harvesting"
+			HarvesterState.RETURNING:
+				return "Returning"
+			HarvesterState.SEEKING_BUILDING:
+				return "To Bldg"
+			HarvesterState.SALVAGING:
+				return "Salvaging"
+		return "Idle"
+
+	# Check if unit has an attack target
+	var attack_target = unit.get("attack_target")
+	if attack_target != null:
+		return "Attacking"
+
+	# Check if unit has a movement target
+	var target_pos = unit.get("target_pos")
+	if target_pos != null and is_instance_valid(unit.mesh):
+		var dist: float = unit.mesh.position.distance_to(target_pos)
+		if dist > 3.0:  # Still moving
+			return "Moving"
+
+	# Check for special states
+	if unit.get("is_phase_shifting", false):
+		return "Phasing"
+	if unit.get("is_overclocked", false):
+		return "Overclock"
+	if unit.get("is_cloaked", false):
+		return "Cloaked"
+	if unit.get("is_in_siege_mode", false):
+		return "Siege"
+
+	# Check if in combat (recently took damage or dealt damage)
+	if unit.get("in_combat", false):
+		return "Combat"
+
+	# Default idle state
+	return "Idle"
 
 
 ## Setup enemy direction indicators.
@@ -4116,26 +5481,77 @@ func _change_game_speed(delta: float) -> void:
 	print("Game speed: %.2fx" % _game_speed)
 
 
-## Setup game speed label in UI.
+## Setup game speed label and buttons in UI.
 func _setup_game_speed_label() -> void:
 	var ui_layer: CanvasLayer = get_node_or_null("UI")
 	if ui_layer == null:
 		return
 
+	# Create container for speed controls
+	var speed_container := HBoxContainer.new()
+	speed_container.name = "SpeedControls"
+	speed_container.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	speed_container.offset_left = -280
+	speed_container.offset_right = -10
+	speed_container.offset_top = 8
+	speed_container.add_theme_constant_override("separation", 4)
+	ui_layer.add_child(speed_container)
+
+	# Speed label
+	var speed_title := Label.new()
+	speed_title.text = "Speed:"
+	speed_title.add_theme_font_size_override("font_size", 14)
+	speed_title.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	speed_container.add_child(speed_title)
+
+	# Speed preset buttons
+	var speed_presets := [0.5, 0.75, 1.0, 1.5, 2.0]
+	var speed_labels := ["0.5x", "0.75x", "1x", "1.5x", "2x"]
+	for i in speed_presets.size():
+		var btn := Button.new()
+		btn.name = "Speed_" + str(speed_presets[i])
+		btn.text = speed_labels[i]
+		btn.custom_minimum_size = Vector2(40, 24)
+		btn.add_theme_font_size_override("font_size", 12)
+
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color(0.15, 0.2, 0.25, 0.9)
+		style.border_color = Color(0.3, 0.5, 0.7, 0.8)
+		style.set_border_width_all(1)
+		style.set_corner_radius_all(4)
+		style.set_content_margin_all(2)
+		btn.add_theme_stylebox_override("normal", style)
+
+		var hover_style := style.duplicate()
+		hover_style.bg_color = Color(0.2, 0.3, 0.4, 0.9)
+		btn.add_theme_stylebox_override("hover", hover_style)
+
+		var pressed_style := style.duplicate()
+		pressed_style.bg_color = Color(0.3, 0.5, 0.7, 0.9)
+		pressed_style.border_color = Color(0.5, 0.8, 1.0)
+		btn.add_theme_stylebox_override("pressed", pressed_style)
+
+		var speed_val: float = speed_presets[i]
+		btn.pressed.connect(func(): _set_game_speed(speed_val))
+		speed_container.add_child(btn)
+
+	# Current speed indicator label
 	_game_speed_label = Label.new()
 	_game_speed_label.name = "GameSpeedLabel"
 	_game_speed_label.text = ""
-	_game_speed_label.add_theme_font_size_override("font_size", 16)
+	_game_speed_label.add_theme_font_size_override("font_size", 14)
 	_game_speed_label.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+	_game_speed_label.custom_minimum_size = Vector2(60, 20)
+	speed_container.add_child(_game_speed_label)
 
-	# Position in top-right corner
-	_game_speed_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_game_speed_label.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	_game_speed_label.offset_left = -100
-	_game_speed_label.offset_right = -10
-	_game_speed_label.offset_top = 10
 
-	ui_layer.add_child(_game_speed_label)
+## Set game speed to specific value.
+func _set_game_speed(speed: float) -> void:
+	_game_speed = clampf(speed, GAME_SPEED_MIN, GAME_SPEED_MAX)
+	Engine.time_scale = _game_speed
+	_update_game_speed_label()
+	_play_ui_sound("click")
+	print("Game speed set to: %.2fx" % _game_speed)
 
 
 ## Update game speed label visibility and text.
@@ -4372,6 +5788,14 @@ func _update_audio_manager(delta: float) -> void:
 	# Update the audio manager
 	_audio_manager.update(delta)
 
+	# Update battle intensity tracker (every frame for smooth intensity)
+	if _battle_intensity_tracker != null:
+		_battle_intensity_tracker.update(delta)
+		# Sync intensity to music manager
+		var music_manager := _audio_manager.get_music_manager()
+		if music_manager != null:
+			music_manager.set_battle_intensity(_battle_intensity_tracker.get_intensity())
+
 	# Update combat intensity for dynamic music (throttled)
 	_combat_intensity_update_timer += delta
 	if _combat_intensity_update_timer >= COMBAT_INTENSITY_UPDATE_INTERVAL:
@@ -4392,7 +5816,7 @@ func _update_combat_intensity() -> void:
 	for unit in _units:
 		if unit.get("is_dead", false):
 			continue
-		if unit.get("faction", 0) == _player_faction:
+		if unit.get("faction_id", 0) == _player_faction:
 			player_unit_count += 1
 			# Check if this unit has a target (in combat)
 			if unit.get("target", null) != null:
@@ -4402,6 +5826,33 @@ func _update_combat_intensity() -> void:
 
 	# Report to audio manager for dynamic music adjustment
 	_audio_manager.report_battle_intensity(player_unit_count, enemy_unit_count, in_combat)
+
+	# Update battle intensity tracker for detailed intensity calculation
+	if _battle_intensity_tracker != null:
+		_battle_intensity_tracker.report_unit_counts(player_unit_count, enemy_unit_count)
+
+
+## Combat started callback - music transitions to combat state.
+func _on_combat_started() -> void:
+	if _audio_manager != null:
+		var music_manager := _audio_manager.get_music_manager()
+		if music_manager != null:
+			music_manager.transition_to_state(DynamicMusicManager.MusicState.LOW_TENSION)
+
+
+## Combat ended callback - music returns to ambient.
+func _on_combat_ended() -> void:
+	if _audio_manager != null:
+		var music_manager := _audio_manager.get_music_manager()
+		if music_manager != null:
+			music_manager.resume_ambient()
+
+
+## Intensity spike callback - for dramatic moments.
+func _on_intensity_spike(level: float) -> void:
+	# Trigger screen shake for intense moments
+	if level >= 0.6:
+		_trigger_screen_shake(level * 0.3)
 
 
 ## Play UI sound effect (button click, notification, etc.)
@@ -4709,6 +6160,68 @@ func _play_explosion_sound(pos: Vector3, size: float = 1.0) -> void:
 	player.volume_db = -6.0 + size * 3.0
 	player.pitch_scale = randf_range(0.8, 1.0) / size
 	player.play()
+
+
+## Play a deep mortar BOOM sound at position.
+func _play_mortar_fire_sound(pos: Vector3) -> void:
+	var player := _get_audio_3d_player()
+	player.global_position = pos
+	player.stream = _generate_mortar_boom_sound()
+	player.volume_db = 3.0  # Loud!
+	player.pitch_scale = randf_range(0.85, 0.95)
+	player.max_distance = 2000.0  # Hearable from far away
+	player.play()
+
+
+## Generate a deep mortar boom sound.
+func _generate_mortar_boom_sound() -> AudioStreamWAV:
+	var sample_rate := 22050
+	var duration := 0.8
+	var samples := int(sample_rate * duration)
+
+	var data := PackedByteArray()
+	data.resize(samples * 2)  # 16-bit samples
+
+	for i in samples:
+		var t: float = float(i) / float(sample_rate)
+		var progress: float = t / duration
+
+		# Deep boom with multiple harmonics
+		var base_freq := 40.0 * (1.0 - progress * 0.5)  # Very low rumble
+		var harm1 := 80.0 * (1.0 - progress * 0.3)
+		var harm2 := 120.0 * (1.0 - progress * 0.2)
+
+		# Combine harmonics
+		var sample := sin(t * TAU * base_freq) * 0.5
+		sample += sin(t * TAU * harm1) * 0.3
+		sample += sin(t * TAU * harm2) * 0.15
+
+		# Add crack/thump at start
+		var crack := 0.0
+		if t < 0.05:
+			crack = randf_range(-1.0, 1.0) * (1.0 - t / 0.05) * 0.8
+		sample += crack
+
+		# Envelope - sharp attack, long decay
+		var envelope := 1.0
+		if t < 0.02:
+			envelope = t / 0.02  # Quick attack
+		else:
+			envelope = exp(-progress * 4.0)  # Exponential decay
+
+		sample *= envelope
+		sample = clampf(sample, -0.95, 0.95)
+
+		var int_sample := int(sample * 32767)
+		data[i * 2] = int_sample & 0xFF
+		data[i * 2 + 1] = (int_sample >> 8) & 0xFF
+
+	var stream := AudioStreamWAV.new()
+	stream.data = data
+	stream.format = AudioStreamWAV.FORMAT_16_BITS
+	stream.mix_rate = sample_rate
+	stream.stereo = false
+	return stream
 
 
 ## Play a procedural impact/hit sound at position.
@@ -5336,6 +6849,55 @@ func _setup_containers() -> void:
 	_effects_container.name = "Effects"
 	add_child(_effects_container)
 
+	# Setup unit ejection animation system
+	var ejection_script := load("res://core/factory/unit_ejection_animation.gd")
+	if ejection_script != null:
+		_unit_ejection_animation = ejection_script.new()
+		_unit_ejection_animation.initialize(get_tree())
+		_unit_ejection_animation.ejection_completed.connect(_on_unit_ejection_completed)
+
+	# Setup MultiMesh rendering system for batched unit rendering
+	if _use_multimesh_rendering:
+		var multimesh_script := load("res://core/factory/multimesh_renderer.gd")
+		if multimesh_script != null:
+			_multimesh_renderer = multimesh_script.new()
+			_multimesh_renderer.initialize(_unit_container)
+			print("[Performance] MultiMesh rendering enabled - draw calls reduced from 5000+ to ~20")
+
+	# Setup LOD system for unit visual detail management
+	var lod_script := load("res://core/view/lod_system.gd")
+	if lod_script != null:
+		_lod_system = lod_script.new()
+		print("[Performance] LOD system enabled - 4 detail levels based on camera distance")
+
+	# Setup performance tier system for AI update throttling
+	if _use_performance_tiers:
+		var tier_script := load("res://core/ai/performance/performance_tier_system.gd")
+		if tier_script != null:
+			_performance_tier_system = tier_script.new()
+			# Set callback for getting nearest enemy distance (used to determine combat proximity)
+			_performance_tier_system.set_get_nearest_enemy_distance(_get_nearest_enemy_distance_for_tier)
+			print("[Performance] Performance tier system enabled - AI updates throttled by combat proximity")
+
+	# Frustum culling is always enabled via the _use_frustum_culling flag
+	if _use_frustum_culling:
+		print("[Performance] Frustum culling enabled - units outside camera view are hidden")
+
+	# Setup voxel terrain system for destructible buildings
+	if _use_voxel_terrain:
+		var voxel_script := load("res://core/destruction/voxel_system.gd")
+		if voxel_script != null:
+			_voxel_system = voxel_script.new()
+			add_child(_voxel_system)
+			# Connect voxel destruction to REE drops
+			_voxel_system.voxel_destroyed.connect(_on_voxel_destroyed)
+			# Initialize with deterministic seed for reproducible terrain
+			_voxel_system.initialize_world(12345)
+			print("[Voxel] Terrain system enabled - destructible buildings with 4 damage stages")
+
+			# Setup dynamic navigation mesh for pathfinding with destructible terrain
+			_setup_dynamic_navmesh()
+
 	# Setup minimap icons container
 	_setup_minimap()
 
@@ -5359,6 +6921,9 @@ func _setup_containers() -> void:
 
 	# Setup factory status panel
 	_setup_factory_status_panel()
+
+	# Setup power grid overlay (toggle with G key)
+	_setup_power_grid_overlay()
 
 	# Setup control group badges
 	_setup_control_group_badges()
@@ -5404,6 +6969,12 @@ func _setup_containers() -> void:
 
 	# Setup REE stats display
 	_setup_ree_stats_label()
+
+	# Setup unit overview panel (right side)
+	_setup_unit_overview_panel()
+
+	# Setup factory production panel (shown when factory selected)
+	_setup_factory_production_panel()
 
 	# Setup fog of war (after match starts)
 
@@ -5556,6 +7127,11 @@ func _initialize_systems() -> void:
 	print("  ResourceManager: OK")
 	print("  FactionManager: OK")
 	print("  Statistics Tracking: OK")
+
+	# PERFORMANCE: Pre-create cached stance indicator meshes and materials
+	_initialize_stance_indicator_cache()
+	print("  StanceIndicatorCache: OK (pre-baked meshes and materials)")
+
 	print("All systems initialized")
 
 
@@ -5847,6 +7423,979 @@ func _get_tier_color(tier: int) -> Color:
 		_: return Color(0.6, 0.6, 0.6)
 
 
+## Setup unit overview panel on right side of screen.
+func _setup_unit_overview_panel() -> void:
+	var ui_layer: CanvasLayer = get_node_or_null("UI")
+	if ui_layer == null:
+		return
+
+	# Create main panel container
+	_unit_overview_panel = PanelContainer.new()
+	_unit_overview_panel.name = "UnitOverviewPanel"
+	_unit_overview_panel.set_anchors_preset(Control.PRESET_CENTER_RIGHT)
+	_unit_overview_panel.offset_left = -200
+	_unit_overview_panel.offset_right = -20
+	_unit_overview_panel.offset_top = -150
+	_unit_overview_panel.offset_bottom = 150
+	_unit_overview_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+
+	# Style the panel
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.08, 0.1, 0.12, 0.9)
+	style.border_color = Color(0.3, 0.4, 0.5, 0.8)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(6)
+	style.set_content_margin_all(8)
+	_unit_overview_panel.add_theme_stylebox_override("panel", style)
+
+	# Create vertical container for unit type rows
+	var vbox := VBoxContainer.new()
+	vbox.name = "VBox"
+	vbox.add_theme_constant_override("separation", 6)
+
+	# Title
+	var title := Label.new()
+	title.name = "Title"
+	title.text = "ARMY OVERVIEW"
+	title.add_theme_font_size_override("font_size", 12)
+	title.add_theme_color_override("font_color", Color(0.7, 0.8, 0.9))
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(title)
+
+	# Create rows for each unit type
+	var unit_types := ["scout", "soldier", "tank", "harvester"]
+	var type_icons := {"scout": "◆", "soldier": "■", "tank": "●", "harvester": "▼"}
+	var type_colors := {
+		"scout": Color(0.4, 0.8, 1.0),
+		"soldier": Color(0.8, 0.8, 0.3),
+		"tank": Color(1.0, 0.4, 0.3),
+		"harvester": Color(0.4, 1.0, 0.4)
+	}
+
+	for unit_type in unit_types:
+		var row := _create_unit_overview_row(unit_type, type_icons[unit_type], type_colors[unit_type])
+		_unit_overview_rows[unit_type] = row
+		vbox.add_child(row)
+
+	# Control groups section
+	var groups_title := Label.new()
+	groups_title.text = "─ GROUPS ─"
+	groups_title.add_theme_font_size_override("font_size", 10)
+	groups_title.add_theme_color_override("font_color", Color(0.5, 0.6, 0.7))
+	groups_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(groups_title)
+
+	# Control group indicators
+	var groups_row := HBoxContainer.new()
+	groups_row.name = "GroupsRow"
+	groups_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	groups_row.add_theme_constant_override("separation", 4)
+	for i in range(1, 10):
+		var group_btn := Button.new()
+		group_btn.name = "Group%d" % i
+		group_btn.text = str(i)
+		group_btn.custom_minimum_size = Vector2(16, 16)
+		group_btn.add_theme_font_size_override("font_size", 9)
+		group_btn.flat = true
+		group_btn.modulate = Color(0.4, 0.4, 0.4)  # Dim when empty
+		group_btn.pressed.connect(_on_group_button_pressed.bind(i))
+		groups_row.add_child(group_btn)
+	vbox.add_child(groups_row)
+
+	_unit_overview_panel.add_child(vbox)
+	ui_layer.add_child(_unit_overview_panel)
+
+
+## Create a row for a unit type in the overview panel.
+func _create_unit_overview_row(unit_type: String, icon: String, color: Color) -> Control:
+	var row := Control.new()
+	row.name = "%sRow" % unit_type.capitalize()
+	row.custom_minimum_size = Vector2(160, 30)
+	row.mouse_filter = Control.MOUSE_FILTER_STOP
+
+	# Background (clickable)
+	var bg := ColorRect.new()
+	bg.name = "Background"
+	bg.color = Color(0.15, 0.17, 0.2, 0.5)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.mouse_filter = Control.MOUSE_FILTER_STOP
+	bg.gui_input.connect(_on_unit_row_input.bind(unit_type))
+	row.add_child(bg)
+
+	# Icon
+	var icon_label := Label.new()
+	icon_label.name = "Icon"
+	icon_label.text = icon
+	icon_label.add_theme_font_size_override("font_size", 14)
+	icon_label.add_theme_color_override("font_color", color)
+	icon_label.position = Vector2(4, 6)
+	row.add_child(icon_label)
+
+	# Type name
+	var name_label := Label.new()
+	name_label.name = "TypeName"
+	name_label.text = unit_type.capitalize()
+	name_label.add_theme_font_size_override("font_size", 10)
+	name_label.add_theme_color_override("font_color", Color(0.7, 0.75, 0.8))
+	name_label.position = Vector2(22, 2)
+	row.add_child(name_label)
+
+	# Count label
+	var count_label := Label.new()
+	count_label.name = "Count"
+	count_label.text = "0"
+	count_label.add_theme_font_size_override("font_size", 11)
+	count_label.add_theme_color_override("font_color", Color(0.9, 0.9, 0.9))
+	count_label.position = Vector2(130, 2)
+	count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	count_label.custom_minimum_size = Vector2(25, 0)
+	row.add_child(count_label)
+
+	# Health bar (shows average health of all units of this type)
+	var health_bar := ProgressBar.new()
+	health_bar.name = "HealthBar"
+	health_bar.min_value = 0
+	health_bar.max_value = 1.0
+	health_bar.value = 1.0
+	health_bar.show_percentage = false
+	health_bar.position = Vector2(22, 18)
+	health_bar.size = Vector2(133, 8)
+
+	# Health bar style
+	var bar_bg := StyleBoxFlat.new()
+	bar_bg.bg_color = Color(0.2, 0.2, 0.2)
+	bar_bg.set_corner_radius_all(2)
+	health_bar.add_theme_stylebox_override("background", bar_bg)
+
+	var bar_fill := StyleBoxFlat.new()
+	bar_fill.bg_color = Color(0.3, 0.8, 0.3)
+	bar_fill.set_corner_radius_all(2)
+	health_bar.add_theme_stylebox_override("fill", bar_fill)
+
+	row.add_child(health_bar)
+
+	return row
+
+
+## Update unit overview panel with current unit counts and health.
+func _update_unit_overview_panel() -> void:
+	if _unit_overview_panel == null:
+		return
+
+	# Hide when factory is selected (production panel takes over right side)
+	if _factory_selected:
+		_unit_overview_panel.visible = false
+		return
+	else:
+		_unit_overview_panel.visible = true
+
+	# Count units by type and calculate average health
+	var unit_counts: Dictionary = {}
+	var health_totals: Dictionary = {}
+	var max_health_totals: Dictionary = {}
+
+	for unit in _units:
+		if not is_instance_valid(unit):
+			continue
+
+		var faction_id: int = unit.get_meta("faction_id", 0)
+		if faction_id != _player_faction:
+			continue
+
+		var is_dead: bool = unit.get_meta("is_dead", false)
+		if is_dead:
+			continue
+
+		var unit_type: String = unit.get_meta("unit_type", "soldier")
+		# Map unit classes to types
+		var unit_class: String = unit.get_meta("unit_class", "medium")
+		if unit_class == "light":
+			unit_type = "scout"
+		elif unit_class == "heavy":
+			unit_type = "tank"
+		elif unit_class == "harvester":
+			unit_type = "harvester"
+		else:
+			unit_type = "soldier"
+
+		unit_counts[unit_type] = unit_counts.get(unit_type, 0) + 1
+		var health: float = unit.get_meta("health", 100.0)
+		var max_health: float = unit.get_meta("max_health", 100.0)
+		health_totals[unit_type] = health_totals.get(unit_type, 0.0) + health
+		max_health_totals[unit_type] = max_health_totals.get(unit_type, 0.0) + max_health
+
+	# Update each row
+	for unit_type in _unit_overview_rows:
+		var row: Control = _unit_overview_rows[unit_type]
+		if not is_instance_valid(row):
+			continue
+
+		var count: int = unit_counts.get(unit_type, 0)
+		var count_label: Label = row.get_node_or_null("Count")
+		if count_label:
+			count_label.text = str(count)
+			if count == 0:
+				count_label.add_theme_color_override("font_color", Color(0.4, 0.4, 0.4))
+			else:
+				count_label.add_theme_color_override("font_color", Color(0.9, 0.9, 0.9))
+
+		# Update health bar
+		var health_bar: ProgressBar = row.get_node_or_null("HealthBar")
+		if health_bar:
+			if count > 0:
+				var avg_health: float = health_totals.get(unit_type, 0.0) / max_health_totals.get(unit_type, 1.0)
+				health_bar.value = avg_health
+
+				# Color based on health
+				var bar_fill: StyleBoxFlat = health_bar.get_theme_stylebox("fill") as StyleBoxFlat
+				if bar_fill:
+					if avg_health > 0.6:
+						bar_fill.bg_color = Color(0.3, 0.8, 0.3)  # Green
+					elif avg_health > 0.3:
+						bar_fill.bg_color = Color(0.9, 0.7, 0.2)  # Yellow
+					else:
+						bar_fill.bg_color = Color(0.9, 0.2, 0.2)  # Red
+			else:
+				health_bar.value = 0
+
+	# Update control group indicators
+	var vbox: VBoxContainer = _unit_overview_panel.get_node_or_null("VBox")
+	if vbox:
+		var groups_row: HBoxContainer = vbox.get_node_or_null("GroupsRow")
+		if groups_row:
+			for i in range(1, 10):
+				var group_btn: Button = groups_row.get_node_or_null("Group%d" % i)
+				if group_btn:
+					var has_units: bool = _control_groups.has(i) and not _control_groups[i].is_empty()
+					if has_units:
+						# Count alive units in group
+						var alive_count := 0
+						for u in _control_groups[i]:
+							if u is Dictionary and not u.get("is_dead", false):
+								alive_count += 1
+							elif u is Node and is_instance_valid(u) and not u.get_meta("is_dead", false):
+								alive_count += 1
+						if alive_count > 0:
+							group_btn.modulate = Color(1.0, 1.0, 1.0)
+							group_btn.tooltip_text = "Group %d: %d units" % [i, alive_count]
+						else:
+							group_btn.modulate = Color(0.4, 0.4, 0.4)
+							group_btn.tooltip_text = "Group %d: Empty" % i
+					else:
+						group_btn.modulate = Color(0.4, 0.4, 0.4)
+						group_btn.tooltip_text = "Group %d: Empty" % i
+
+
+## Handle clicking on a unit type row in the overview panel.
+func _on_unit_row_input(event: InputEvent, unit_type: String) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_select_units_by_type(unit_type)
+
+
+## Handle clicking on a control group button.
+func _on_group_button_pressed(group_num: int) -> void:
+	_recall_control_group(group_num)
+
+
+## Select all player units of a specific type.
+func _select_units_by_type(unit_type: String) -> void:
+	_deselect_all_units()
+
+	var type_map := {
+		"scout": "light",
+		"soldier": "medium",
+		"tank": "heavy",
+		"harvester": "harvester"
+	}
+	var target_class: String = type_map.get(unit_type, "medium")
+
+	for unit in _units:
+		if not is_instance_valid(unit):
+			continue
+
+		var faction_id: int = unit.get_meta("faction_id", 0)
+		if faction_id != _player_faction:
+			continue
+
+		var is_dead: bool = unit.get_meta("is_dead", false)
+		if is_dead:
+			continue
+
+		var unit_class: String = unit.get_meta("unit_class", "medium")
+		if unit_class == target_class:
+			_select_unit(unit)
+
+	_update_selection_rings()
+	_update_portrait_panel()
+
+	# Play selection sound
+	if _should_play_sound() and not _selected_units.is_empty():
+		_play_ui_sound("select")
+
+
+## Setup the power grid overlay UI (toggle with G key).
+func _setup_power_grid_overlay() -> void:
+	var ui_layer: CanvasLayer = get_node_or_null("UI")
+	if ui_layer == null:
+		return
+
+	# Create power status panel (top-left corner)
+	_power_status_panel = PowerStatusPanel.new()
+	var panel_container := Control.new()
+	panel_container.name = "PowerOverlayContainer"
+	panel_container.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	panel_container.offset_left = 10
+	panel_container.offset_top = 120  # Below resource panel
+	panel_container.offset_right = 260
+	panel_container.offset_bottom = 340
+	panel_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui_layer.add_child(panel_container)
+
+	var faction_str: String = FACTION_ID_TO_STRING.get(_player_faction, "neutral")
+	_power_status_panel.create_ui(panel_container, faction_str)
+
+	# Create power grid display (overlays the main view)
+	_power_grid_display = PowerGridDisplay.new()
+	var grid_container := Control.new()
+	grid_container.name = "PowerGridDisplayContainer"
+	grid_container.set_anchors_preset(Control.PRESET_FULL_RECT)
+	grid_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui_layer.add_child(grid_container)
+	_power_grid_display.create_ui(grid_container, faction_str)
+
+	# Initially hidden
+	panel_container.visible = false
+	grid_container.visible = false
+
+	print("[Power] Power grid overlay ready (press G to toggle)")
+
+
+## Toggle power grid overlay visibility.
+func _toggle_power_grid_overlay() -> void:
+	_power_grid_overlay_visible = not _power_grid_overlay_visible
+
+	var ui_layer: CanvasLayer = get_node_or_null("UI")
+	if ui_layer == null:
+		return
+
+	var panel_container: Control = ui_layer.get_node_or_null("PowerOverlayContainer")
+	var grid_container: Control = ui_layer.get_node_or_null("PowerGridDisplayContainer")
+
+	if panel_container:
+		panel_container.visible = _power_grid_overlay_visible
+	if grid_container:
+		grid_container.visible = _power_grid_overlay_visible
+
+	if _power_grid_overlay_visible:
+		_update_power_grid_overlay()
+		print("[Power] Grid overlay ON")
+	else:
+		print("[Power] Grid overlay OFF")
+
+
+## Update power grid overlay with current data.
+func _update_power_grid_overlay() -> void:
+	if not _power_grid_overlay_visible:
+		return
+
+	if _power_grid_manager == null:
+		return
+
+	var summary: Dictionary = _power_grid_manager.get_summary()
+
+	# Update power status panel
+	if _power_status_panel != null:
+		var generation: float = summary.get("power", {}).get("generation", 0.0)
+		var demand: float = summary.get("power", {}).get("demand", 0.0)
+		var blackouts: int = summary.get("districts", {}).get("blackout", 0)
+		var operational: int = summary.get("plants", {}).get("operational", 0)
+		var total_plants: int = summary.get("plants", {}).get("total", 0)
+
+		_power_status_panel.update_power(generation, demand, blackouts, operational, total_plants)
+
+	# Update power grid display with plants and lines
+	if _power_grid_display != null:
+		_update_power_grid_display_data()
+
+
+## Update power grid display with plant and line positions.
+func _update_power_grid_display_data() -> void:
+	if _power_grid_display == null or _power_grid_manager == null:
+		return
+
+	# Get all plants and update their screen positions
+	var plants: Dictionary = _power_grid_manager.get_all_plants()
+	for plant_id in plants:
+		var plant: PowerPlant = plants[plant_id]
+		var screen_pos := _world_to_screen(plant.position)
+		var status := 0 if plant.is_operational() else 2  # 0 = operational, 2 = destroyed
+		_power_grid_display.set_plant(plant_id, screen_pos, plant.current_output, plant.max_output, status)
+
+	# Update visual
+	_power_grid_display.update_power_grid_visual()
+
+
+## Convert world position to screen position.
+func _world_to_screen(world_pos: Vector3) -> Vector2:
+	if camera == null:
+		return Vector2.ZERO
+	return camera.unproject_position(world_pos)
+
+
+## Setup the factory production panel (shown when factory is selected).
+func _setup_factory_production_panel() -> void:
+	var ui_layer: CanvasLayer = get_node_or_null("UI")
+	if ui_layer == null:
+		return
+
+	_factory_production_panel = PanelContainer.new()
+	_factory_production_panel.name = "FactoryProductionPanel"
+	_factory_production_panel.set_anchors_preset(Control.PRESET_CENTER_RIGHT)
+	_factory_production_panel.offset_left = -240
+	_factory_production_panel.offset_right = -20
+	_factory_production_panel.offset_top = -220
+	_factory_production_panel.offset_bottom = 220
+	_factory_production_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_factory_production_panel.visible = false  # Hidden until factory selected
+
+	# Style the panel
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.06, 0.08, 0.1, 0.95)
+	style.border_color = Color(0.4, 0.5, 0.6, 0.9)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(8)
+	style.set_content_margin_all(12)
+	_factory_production_panel.add_theme_stylebox_override("panel", style)
+
+	var vbox := VBoxContainer.new()
+	vbox.name = "VBox"
+	vbox.add_theme_constant_override("separation", 8)
+
+	# Title
+	var title := Label.new()
+	title.name = "Title"
+	title.text = "⚙ FACTORY PRODUCTION"
+	title.add_theme_font_size_override("font_size", 14)
+	title.add_theme_color_override("font_color", Color(0.9, 0.95, 1.0))
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(title)
+
+	# REE display
+	var ree_row := HBoxContainer.new()
+	ree_row.name = "REERow"
+	ree_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	var ree_icon := Label.new()
+	ree_icon.text = "💎"
+	ree_icon.add_theme_font_size_override("font_size", 16)
+	ree_row.add_child(ree_icon)
+	var ree_label := Label.new()
+	ree_label.name = "REEAmount"
+	ree_label.text = " 0 REE"
+	ree_label.add_theme_font_size_override("font_size", 14)
+	ree_label.add_theme_color_override("font_color", Color(0.2, 1.0, 0.8))
+	ree_row.add_child(ree_label)
+	vbox.add_child(ree_row)
+
+	# Separator
+	var sep := HSeparator.new()
+	sep.add_theme_constant_override("separation", 4)
+	vbox.add_child(sep)
+
+	# Unit rows
+	var unit_types := ["light", "medium", "heavy", "harvester"]
+	var unit_names := {"light": "Scout", "medium": "Soldier", "heavy": "Heavy Tank", "harvester": "Harvester"}
+	var unit_icons := {"light": "◆", "medium": "■", "heavy": "●", "harvester": "▼"}
+	var unit_keys := {"light": "1", "medium": "2", "heavy": "3", "harvester": "4"}
+
+	for unit_class in unit_types:
+		var row := _create_production_row(unit_class, unit_names[unit_class], unit_icons[unit_class], unit_keys[unit_class])
+		vbox.add_child(row)
+
+	# Queue section
+	var queue_sep := HSeparator.new()
+	queue_sep.add_theme_constant_override("separation", 4)
+	vbox.add_child(queue_sep)
+
+	var queue_title := Label.new()
+	queue_title.text = "─ PRODUCTION QUEUE ─"
+	queue_title.add_theme_font_size_override("font_size", 11)
+	queue_title.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
+	queue_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(queue_title)
+
+	# Current production display (with progress bar)
+	var current_prod := VBoxContainer.new()
+	current_prod.name = "CurrentProduction"
+	current_prod.add_theme_constant_override("separation", 2)
+
+	var current_label := Label.new()
+	current_label.name = "CurrentLabel"
+	current_label.text = "Building: Idle"
+	current_label.add_theme_font_size_override("font_size", 10)
+	current_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	current_prod.add_child(current_label)
+
+	var progress_row := HBoxContainer.new()
+	progress_row.add_theme_constant_override("separation", 6)
+
+	_factory_current_production_bar = ProgressBar.new()
+	_factory_current_production_bar.name = "CurrentProgressBar"
+	_factory_current_production_bar.min_value = 0.0
+	_factory_current_production_bar.max_value = 100.0
+	_factory_current_production_bar.value = 0.0
+	_factory_current_production_bar.show_percentage = false
+	_factory_current_production_bar.custom_minimum_size = Vector2(130, 14)
+	_factory_current_production_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var prog_bg := StyleBoxFlat.new()
+	prog_bg.bg_color = Color(0.15, 0.15, 0.15)
+	prog_bg.set_corner_radius_all(3)
+	_factory_current_production_bar.add_theme_stylebox_override("background", prog_bg)
+
+	var prog_fill := StyleBoxFlat.new()
+	prog_fill.bg_color = Color(0.3, 0.7, 0.4)
+	prog_fill.set_corner_radius_all(3)
+	_factory_current_production_bar.add_theme_stylebox_override("fill", prog_fill)
+
+	progress_row.add_child(_factory_current_production_bar)
+
+	var time_label := Label.new()
+	time_label.name = "TimeRemaining"
+	time_label.text = ""
+	time_label.add_theme_font_size_override("font_size", 10)
+	time_label.add_theme_color_override("font_color", Color(0.6, 0.8, 0.6))
+	time_label.custom_minimum_size.x = 35
+	time_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	progress_row.add_child(time_label)
+
+	current_prod.add_child(progress_row)
+	vbox.add_child(current_prod)
+
+	# Queue list (scrollable)
+	var queue_scroll := ScrollContainer.new()
+	queue_scroll.name = "QueueScroll"
+	queue_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	queue_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	queue_scroll.custom_minimum_size = Vector2(0, 70)
+
+	_factory_queue_list_container = VBoxContainer.new()
+	_factory_queue_list_container.name = "QueueList"
+	_factory_queue_list_container.add_theme_constant_override("separation", 2)
+
+	var empty_label := Label.new()
+	empty_label.name = "EmptyLabel"
+	empty_label.text = "(Queue empty)"
+	empty_label.add_theme_font_size_override("font_size", 10)
+	empty_label.add_theme_color_override("font_color", Color(0.4, 0.4, 0.4))
+	empty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_factory_queue_list_container.add_child(empty_label)
+
+	queue_scroll.add_child(_factory_queue_list_container)
+	vbox.add_child(queue_scroll)
+
+	# Start queue button
+	var start_btn := Button.new()
+	start_btn.name = "StartQueueBtn"
+	start_btn.text = "▶ START PRODUCTION"
+	start_btn.add_theme_font_size_override("font_size", 12)
+	start_btn.custom_minimum_size = Vector2(180, 32)
+	start_btn.pressed.connect(_on_start_production_queue)
+
+	var btn_style := StyleBoxFlat.new()
+	btn_style.bg_color = Color(0.2, 0.5, 0.3)
+	btn_style.set_corner_radius_all(4)
+	start_btn.add_theme_stylebox_override("normal", btn_style)
+
+	var btn_hover := StyleBoxFlat.new()
+	btn_hover.bg_color = Color(0.3, 0.6, 0.4)
+	btn_hover.set_corner_radius_all(4)
+	start_btn.add_theme_stylebox_override("hover", btn_hover)
+
+	vbox.add_child(start_btn)
+
+	# Help text
+	var help := Label.new()
+	help.text = "Click ⊕/⊖ or Shift+1-4"
+	help.add_theme_font_size_override("font_size", 10)
+	help.add_theme_color_override("font_color", Color(0.4, 0.45, 0.5))
+	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(help)
+
+	_factory_production_panel.add_child(vbox)
+	ui_layer.add_child(_factory_production_panel)
+
+
+## Create a row for a unit type in the production panel.
+func _create_production_row(unit_class: String, display_name: String, icon: String, key: String) -> Control:
+	var row := HBoxContainer.new()
+	row.name = "%sRow" % unit_class.capitalize()
+	row.add_theme_constant_override("separation", 6)
+
+	# Icon
+	var icon_label := Label.new()
+	icon_label.text = icon
+	icon_label.add_theme_font_size_override("font_size", 14)
+	icon_label.custom_minimum_size = Vector2(20, 0)
+	row.add_child(icon_label)
+
+	# Name + key hint
+	var name_box := VBoxContainer.new()
+	name_box.custom_minimum_size = Vector2(70, 0)
+	var name_label := Label.new()
+	name_label.text = display_name
+	name_label.add_theme_font_size_override("font_size", 11)
+	name_label.add_theme_color_override("font_color", Color(0.85, 0.9, 0.95))
+	name_box.add_child(name_label)
+	var key_label := Label.new()
+	key_label.text = "[Shift+%s]" % key
+	key_label.add_theme_font_size_override("font_size", 9)
+	key_label.add_theme_color_override("font_color", Color(0.4, 0.45, 0.5))
+	name_box.add_child(key_label)
+	row.add_child(name_box)
+
+	# Cost
+	var cost: float = PRODUCTION_COSTS.get(unit_class, 50)
+	var cost_label := Label.new()
+	cost_label.name = "Cost"
+	cost_label.text = "%.0f" % cost
+	cost_label.add_theme_font_size_override("font_size", 11)
+	cost_label.add_theme_color_override("font_color", Color(0.2, 0.9, 0.7))
+	cost_label.custom_minimum_size = Vector2(30, 0)
+	cost_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	row.add_child(cost_label)
+
+	# Can afford indicator
+	var afford_label := Label.new()
+	afford_label.name = "Afford"
+	afford_label.text = "x0"
+	afford_label.add_theme_font_size_override("font_size", 10)
+	afford_label.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
+	afford_label.custom_minimum_size = Vector2(25, 0)
+	row.add_child(afford_label)
+
+	# Minus button
+	var minus_btn := Button.new()
+	minus_btn.name = "MinusBtn"
+	minus_btn.text = "−"
+	minus_btn.custom_minimum_size = Vector2(24, 24)
+	minus_btn.add_theme_font_size_override("font_size", 14)
+	minus_btn.pressed.connect(_on_production_minus.bind(unit_class))
+	row.add_child(minus_btn)
+
+	# Queue count
+	var count_label := Label.new()
+	count_label.name = "QueueCount"
+	count_label.text = "0"
+	count_label.add_theme_font_size_override("font_size", 12)
+	count_label.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0))
+	count_label.custom_minimum_size = Vector2(20, 0)
+	count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	row.add_child(count_label)
+
+	# Plus button
+	var plus_btn := Button.new()
+	plus_btn.name = "PlusBtn"
+	plus_btn.text = "+"
+	plus_btn.custom_minimum_size = Vector2(24, 24)
+	plus_btn.add_theme_font_size_override("font_size", 14)
+	plus_btn.pressed.connect(_on_production_plus.bind(unit_class))
+	row.add_child(plus_btn)
+
+	return row
+
+
+## Handle minus button click for production.
+func _on_production_minus(unit_class: String) -> void:
+	var current: int = _factory_queue_counts.get(unit_class, 0)
+	if current > 0:
+		_factory_queue_counts[unit_class] = current - 1
+		_update_factory_production_panel()
+		_play_ui_sound("click")
+
+
+## Handle plus button click for production.
+func _on_production_plus(unit_class: String) -> void:
+	var cost: float = PRODUCTION_COSTS.get(unit_class, 50)
+	var ree: float = ResourceManager.get_current_ree(_player_faction) if ResourceManager else 0.0
+
+	# Calculate how much we'd be spending if we add this
+	var total_queued_cost := 0.0
+	for uc in _factory_queue_counts:
+		total_queued_cost += _factory_queue_counts[uc] * PRODUCTION_COSTS.get(uc, 50)
+
+	if ree >= total_queued_cost + cost:
+		_factory_queue_counts[unit_class] = _factory_queue_counts.get(unit_class, 0) + 1
+		_update_factory_production_panel()
+		_play_ui_sound("click")
+	else:
+		_play_ui_sound("error")
+
+
+## Handle start production queue button.
+func _on_start_production_queue() -> void:
+	var total_queued := 0
+	for unit_class in _factory_queue_counts:
+		var count: int = _factory_queue_counts[unit_class]
+		for i in count:
+			if _queue_unit_production(unit_class):
+				total_queued += 1
+
+	if total_queued > 0:
+		print("Queued %d units for production" % total_queued)
+		_play_ui_sound("notification")
+	else:
+		_play_ui_sound("error")
+
+	# Clear the queue counts
+	_factory_queue_counts.clear()
+	_update_factory_production_panel()
+
+
+## Update the factory production panel with current REE and affordability.
+func _update_factory_production_panel() -> void:
+	if _factory_production_panel == null or not _factory_production_panel.visible:
+		return
+
+	var vbox: VBoxContainer = _factory_production_panel.get_node_or_null("VBox")
+	if vbox == null:
+		return
+
+	var ree: float = ResourceManager.get_current_ree(_player_faction) if ResourceManager else 0.0
+
+	# Update REE display
+	var ree_row: HBoxContainer = vbox.get_node_or_null("REERow")
+	if ree_row:
+		var ree_label: Label = ree_row.get_node_or_null("REEAmount")
+		if ree_label:
+			ree_label.text = " %.0f REE" % ree
+
+	# Calculate total cost of currently queued items
+	var total_queued_cost := 0.0
+	for uc in _factory_queue_counts:
+		total_queued_cost += _factory_queue_counts[uc] * PRODUCTION_COSTS.get(uc, 50)
+
+	var remaining_ree: float = ree - total_queued_cost
+
+	# Update each unit type row
+	var unit_types := ["light", "medium", "heavy", "harvester"]
+	for unit_class in unit_types:
+		var row: HBoxContainer = vbox.get_node_or_null("%sRow" % unit_class.capitalize())
+		if row == null:
+			continue
+
+		var cost: float = PRODUCTION_COSTS.get(unit_class, 50)
+		var can_afford: int = int(remaining_ree / cost)
+
+		# Update afford count
+		var afford_label: Label = row.get_node_or_null("Afford")
+		if afford_label:
+			afford_label.text = "x%d" % can_afford
+			if can_afford > 0:
+				afford_label.add_theme_color_override("font_color", Color(0.4, 0.8, 0.5))
+			else:
+				afford_label.add_theme_color_override("font_color", Color(0.8, 0.3, 0.3))
+
+		# Update queue count display
+		var count_label: Label = row.get_node_or_null("QueueCount")
+		if count_label:
+			var queued: int = _factory_queue_counts.get(unit_class, 0)
+			count_label.text = str(queued)
+			if queued > 0:
+				count_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.3))
+			else:
+				count_label.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
+
+		# Enable/disable buttons based on affordability
+		var plus_btn: Button = row.get_node_or_null("PlusBtn")
+		if plus_btn:
+			plus_btn.disabled = can_afford <= 0
+
+		var minus_btn: Button = row.get_node_or_null("MinusBtn")
+		if minus_btn:
+			minus_btn.disabled = _factory_queue_counts.get(unit_class, 0) <= 0
+
+	# Update current production display
+	var current_prod: VBoxContainer = vbox.get_node_or_null("CurrentProduction")
+	if current_prod:
+		var current_label: Label = current_prod.get_node_or_null("CurrentLabel")
+		var time_remaining_label: Label = current_prod.get_node_or_null("TimeRemaining")
+
+		if not _current_production.is_empty():
+			var progress: float = _current_production.get("progress", 0.0)
+			var total: float = _current_production.get("total_time", 5.0)
+			var pct: float = (progress / total) * 100.0
+			var unit_class: String = _current_production.get("unit_class", "Unknown")
+			var time_left: float = maxf(0.0, total - progress)
+
+			if current_label:
+				current_label.text = "Building: %s" % unit_class.capitalize()
+				current_label.add_theme_color_override("font_color", Color(0.9, 0.95, 1.0))
+
+			if _factory_current_production_bar:
+				_factory_current_production_bar.value = pct
+				# Color by unit type
+				var fill_style: StyleBoxFlat = _factory_current_production_bar.get_theme_stylebox("fill") as StyleBoxFlat
+				if fill_style:
+					match unit_class:
+						"light": fill_style.bg_color = Color(0.3, 0.7, 0.3)
+						"medium": fill_style.bg_color = Color(0.3, 0.5, 0.8)
+						"heavy": fill_style.bg_color = Color(0.8, 0.5, 0.2)
+						"harvester": fill_style.bg_color = Color(0.8, 0.7, 0.2)
+
+			if time_remaining_label:
+				time_remaining_label.text = "%.1fs" % time_left
+		else:
+			if current_label:
+				current_label.text = "Building: Idle"
+				current_label.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
+			if _factory_current_production_bar:
+				_factory_current_production_bar.value = 0.0
+			if time_remaining_label:
+				time_remaining_label.text = ""
+
+	# Update detailed queue list
+	_update_factory_queue_list()
+
+
+## Update the detailed queue list in the factory production panel.
+func _update_factory_queue_list() -> void:
+	if _factory_queue_list_container == null:
+		return
+
+	# Clear existing queue items (keep only EmptyLabel)
+	for child in _factory_queue_list_container.get_children():
+		if child.name != "EmptyLabel":
+			child.queue_free()
+
+	# Get empty label
+	var empty_label: Label = _factory_queue_list_container.get_node_or_null("EmptyLabel")
+
+	# Show queue items
+	if _production_queue.is_empty():
+		if empty_label:
+			empty_label.visible = true
+		return
+
+	if empty_label:
+		empty_label.visible = false
+
+	# Create entries for each queued item (limit to 5 visible)
+	var max_show := mini(_production_queue.size(), 5)
+	for i in range(max_show):
+		var item: Dictionary = _production_queue[i]
+		var row := _create_factory_queue_item(i, item)
+		_factory_queue_list_container.add_child(row)
+
+	# Show overflow count
+	if _production_queue.size() > 5:
+		var overflow_label := Label.new()
+		overflow_label.text = "+%d more in queue..." % (_production_queue.size() - 5)
+		overflow_label.add_theme_font_size_override("font_size", 9)
+		overflow_label.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
+		overflow_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_factory_queue_list_container.add_child(overflow_label)
+
+
+## Create a queue item row for the factory panel.
+func _create_factory_queue_item(index: int, item: Dictionary) -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+
+	# Index
+	var idx_label := Label.new()
+	idx_label.text = "%d." % (index + 1)
+	idx_label.add_theme_font_size_override("font_size", 10)
+	idx_label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+	idx_label.custom_minimum_size.x = 18
+	row.add_child(idx_label)
+
+	# Unit type icon
+	var unit_class: String = item.get("unit_class", "unknown")
+	var icon_label := Label.new()
+	var icon_colors := {"light": Color(0.3, 0.7, 0.3), "medium": Color(0.3, 0.5, 0.8), "heavy": Color(0.8, 0.5, 0.2), "harvester": Color(0.8, 0.7, 0.2)}
+	var icons := {"light": "◆", "medium": "■", "heavy": "●", "harvester": "▼"}
+	icon_label.text = icons.get(unit_class, "?")
+	icon_label.add_theme_font_size_override("font_size", 12)
+	icon_label.add_theme_color_override("font_color", icon_colors.get(unit_class, Color.WHITE))
+	row.add_child(icon_label)
+
+	# Unit name
+	var name_label := Label.new()
+	var names := {"light": "Scout", "medium": "Soldier", "heavy": "Tank", "harvester": "Harvester"}
+	name_label.text = names.get(unit_class, unit_class.capitalize())
+	name_label.add_theme_font_size_override("font_size", 10)
+	name_label.add_theme_color_override("font_color", Color(0.85, 0.9, 0.95))
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(name_label)
+
+	# Time remaining
+	var total_time: float = item.get("total_time", 5.0)
+	var progress: float = item.get("progress", 0.0)
+	var time_remaining: float = maxf(0.0, total_time - progress)
+	var time_label := Label.new()
+	time_label.text = "%.1fs" % time_remaining
+	time_label.add_theme_font_size_override("font_size", 9)
+	time_label.add_theme_color_override("font_color", Color(0.5, 0.6, 0.5))
+	time_label.custom_minimum_size.x = 30
+	time_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	row.add_child(time_label)
+
+	# Cancel button
+	var cancel_btn := Button.new()
+	cancel_btn.text = "×"
+	cancel_btn.custom_minimum_size = Vector2(18, 18)
+	cancel_btn.add_theme_font_size_override("font_size", 12)
+	cancel_btn.tooltip_text = "Cancel this unit"
+	cancel_btn.pressed.connect(_on_cancel_queue_item.bind(index))
+
+	var btn_style := StyleBoxFlat.new()
+	btn_style.bg_color = Color(0.5, 0.2, 0.2)
+	btn_style.set_corner_radius_all(3)
+	cancel_btn.add_theme_stylebox_override("normal", btn_style)
+
+	var btn_hover := StyleBoxFlat.new()
+	btn_hover.bg_color = Color(0.7, 0.3, 0.3)
+	btn_hover.set_corner_radius_all(3)
+	cancel_btn.add_theme_stylebox_override("hover", btn_hover)
+
+	row.add_child(cancel_btn)
+
+	return row
+
+
+## Handle cancel queue item button press.
+func _on_cancel_queue_item(index: int) -> void:
+	if index < 0 or index >= _production_queue.size():
+		return
+
+	# Refund cost
+	var item: Dictionary = _production_queue[index]
+	var unit_class: String = item.get("unit_class", "")
+	var cost: float = PRODUCTION_COSTS.get(unit_class, 0)
+
+	# Partial refund based on progress (less refund the more progress made)
+	var progress: float = item.get("progress", 0.0)
+	var total_time: float = item.get("total_time", 5.0)
+	var progress_pct: float = progress / total_time
+	var refund: float = cost * (1.0 - progress_pct * 0.5)  # 50-100% refund
+
+	# Add refund to resources
+	if ResourceManager:
+		ResourceManager.add_ree(_player_faction, refund)
+
+	# Remove from queue
+	_production_queue.remove_at(index)
+
+	# Play cancel sound
+	_play_ui_sound("click")
+
+	# Update displays
+	_update_factory_production_panel()
+	_update_production_queue_ui()
+
+	print("Cancelled %s production, refunded %.0f REE" % [unit_class, refund])
+
+
 ## Get faction XP damage multiplier for combat
 func _get_faction_xp_damage_mult(faction_id: int) -> float:
 	if _experience_pool == null:
@@ -6028,54 +8577,78 @@ func _spawn_human_city_patrols() -> void:
 	print("Spawning Human Remnant city patrols...")
 
 	# Define patrol locations throughout the city (factories are now on sides)
-	# City is centered at origin, MAP_SIZE is 1200 (so -600 to +600)
+	# City is centered at origin, MAP_SIZE is 2400 (so -1200 to +1200)
 	# The center has a Military Installation where Human Resistance is concentrated
 	var patrol_locations: Array[Dictionary] = [
 		# MILITARY INSTALLATION CENTER (heavily fortified)
 		# Main garrison inside the base
-		{"pos": Vector3(0, 0, 0), "size": 6, "type": "garrison"},      # Central command
-		{"pos": Vector3(20, 0, 0), "size": 4, "type": "heavy"},        # East of command
-		{"pos": Vector3(-20, 0, 0), "size": 4, "type": "heavy"},       # West of command
-		{"pos": Vector3(0, 0, 20), "size": 4, "type": "soldier"},      # South of command
-		{"pos": Vector3(0, 0, -20), "size": 4, "type": "soldier"},     # North of command
+		{"pos": Vector3(0, 0, 0), "size": 8, "type": "garrison"},      # Central command (larger garrison)
+		{"pos": Vector3(30, 0, 0), "size": 5, "type": "heavy"},        # East of command
+		{"pos": Vector3(-30, 0, 0), "size": 5, "type": "heavy"},       # West of command
+		{"pos": Vector3(0, 0, 30), "size": 5, "type": "soldier"},      # South of command
+		{"pos": Vector3(0, 0, -30), "size": 5, "type": "soldier"},     # North of command
 
 		# Tower guard positions (corner towers of Military Installation)
-		{"pos": Vector3(42, 0, 42), "size": 2, "type": "sniper"},      # SE tower
-		{"pos": Vector3(-42, 0, 42), "size": 2, "type": "sniper"},     # SW tower
-		{"pos": Vector3(42, 0, -42), "size": 2, "type": "sniper"},     # NE tower
-		{"pos": Vector3(-42, 0, -42), "size": 2, "type": "sniper"},    # NW tower
+		{"pos": Vector3(60, 0, 60), "size": 3, "type": "sniper"},      # SE tower
+		{"pos": Vector3(-60, 0, 60), "size": 3, "type": "sniper"},     # SW tower
+		{"pos": Vector3(60, 0, -60), "size": 3, "type": "sniper"},     # NE tower
+		{"pos": Vector3(-60, 0, -60), "size": 3, "type": "sniper"},    # NW tower
 
 		# Perimeter patrol (just outside the walls of Military Installation)
-		{"pos": Vector3(60, 0, 0), "size": 3, "type": "patrol"},       # East perimeter
-		{"pos": Vector3(-60, 0, 0), "size": 3, "type": "patrol"},      # West perimeter
-		{"pos": Vector3(0, 0, 60), "size": 3, "type": "patrol"},       # South perimeter
-		{"pos": Vector3(0, 0, -60), "size": 3, "type": "patrol"},      # North perimeter
+		{"pos": Vector3(100, 0, 0), "size": 4, "type": "patrol"},      # East perimeter
+		{"pos": Vector3(-100, 0, 0), "size": 4, "type": "patrol"},     # West perimeter
+		{"pos": Vector3(0, 0, 100), "size": 4, "type": "patrol"},      # South perimeter
+		{"pos": Vector3(0, 0, -100), "size": 4, "type": "patrol"},     # North perimeter
 
-		# OUTER CITY PATROLS (strategic checkpoints)
-		# Mid-range positions (between installation and faction factories)
-		{"pos": Vector3(260, 0, 0), "size": 3, "type": "mixed"},       # East approach
-		{"pos": Vector3(-260, 0, 0), "size": 3, "type": "mixed"},      # West approach
-		{"pos": Vector3(0, 0, 260), "size": 3, "type": "mixed"},       # South approach
-		{"pos": Vector3(0, 0, -260), "size": 3, "type": "mixed"},      # North approach
+		# INNER CITY PATROLS (first ring, ~200-300 from center)
+		{"pos": Vector3(250, 0, 0), "size": 4, "type": "mixed"},       # East inner
+		{"pos": Vector3(-250, 0, 0), "size": 4, "type": "mixed"},      # West inner
+		{"pos": Vector3(0, 0, 250), "size": 4, "type": "mixed"},       # South inner
+		{"pos": Vector3(0, 0, -250), "size": 4, "type": "mixed"},      # North inner
+		{"pos": Vector3(180, 0, 180), "size": 3, "type": "heavy"},     # SE inner
+		{"pos": Vector3(-180, 0, 180), "size": 3, "type": "heavy"},    # SW inner
+		{"pos": Vector3(180, 0, -180), "size": 3, "type": "heavy"},    # NE inner
+		{"pos": Vector3(-180, 0, -180), "size": 3, "type": "heavy"},   # NW inner
 
-		# Diagonal positions (strategic intersections - corner districts)
-		{"pos": Vector3(200, 0, 200), "size": 3, "type": "heavy"},     # SE corner
-		{"pos": Vector3(-200, 0, 200), "size": 3, "type": "heavy"},    # SW corner
-		{"pos": Vector3(200, 0, -200), "size": 3, "type": "heavy"},    # NE corner
-		{"pos": Vector3(-200, 0, -200), "size": 3, "type": "heavy"},   # NW corner
+		# MID CITY PATROLS (second ring, ~400-500 from center)
+		{"pos": Vector3(450, 0, 0), "size": 4, "type": "mixed"},       # East mid
+		{"pos": Vector3(-450, 0, 0), "size": 4, "type": "mixed"},      # West mid
+		{"pos": Vector3(0, 0, 450), "size": 4, "type": "mixed"},       # South mid
+		{"pos": Vector3(0, 0, -450), "size": 4, "type": "mixed"},      # North mid
+		{"pos": Vector3(350, 0, 350), "size": 4, "type": "heavy"},     # SE mid
+		{"pos": Vector3(-350, 0, 350), "size": 4, "type": "heavy"},    # SW mid
+		{"pos": Vector3(350, 0, -350), "size": 4, "type": "heavy"},    # NE mid
+		{"pos": Vector3(-350, 0, -350), "size": 4, "type": "heavy"},   # NW mid
 
-		# FAR OUTER PATROLS (closer to faction territories)
-		# Cardinal far positions (between mid-range and factories)
-		{"pos": Vector3(400, 0, 0), "size": 2, "type": "patrol"},      # Far east
-		{"pos": Vector3(-400, 0, 0), "size": 2, "type": "patrol"},     # Far west
-		{"pos": Vector3(0, 0, 400), "size": 2, "type": "patrol"},      # Far south
-		{"pos": Vector3(0, 0, -400), "size": 2, "type": "patrol"},     # Far north
+		# OUTER CITY PATROLS (third ring, ~600-700 from center)
+		{"pos": Vector3(650, 0, 0), "size": 3, "type": "patrol"},      # East outer
+		{"pos": Vector3(-650, 0, 0), "size": 3, "type": "patrol"},     # West outer
+		{"pos": Vector3(0, 0, 650), "size": 3, "type": "patrol"},      # South outer
+		{"pos": Vector3(0, 0, -650), "size": 3, "type": "patrol"},     # North outer
+		{"pos": Vector3(500, 0, 500), "size": 3, "type": "mixed"},     # SE outer
+		{"pos": Vector3(-500, 0, 500), "size": 3, "type": "mixed"},    # SW outer
+		{"pos": Vector3(500, 0, -500), "size": 3, "type": "mixed"},    # NE outer
+		{"pos": Vector3(-500, 0, -500), "size": 3, "type": "mixed"},   # NW outer
 
-		# Diagonal far positions (outer district corners)
-		{"pos": Vector3(350, 0, 350), "size": 2, "type": "mixed"},     # Far SE
-		{"pos": Vector3(-350, 0, 350), "size": 2, "type": "mixed"},    # Far SW
-		{"pos": Vector3(350, 0, -350), "size": 2, "type": "mixed"},    # Far NE
-		{"pos": Vector3(-350, 0, -350), "size": 2, "type": "mixed"},   # Far NW
+		# FAR OUTER PATROLS (fourth ring, ~800-900 from center, closer to faction territories)
+		{"pos": Vector3(850, 0, 0), "size": 3, "type": "patrol"},      # Far east
+		{"pos": Vector3(-850, 0, 0), "size": 3, "type": "patrol"},     # Far west
+		{"pos": Vector3(0, 0, 850), "size": 3, "type": "patrol"},      # Far south
+		{"pos": Vector3(0, 0, -850), "size": 3, "type": "patrol"},     # Far north
+		{"pos": Vector3(700, 0, 700), "size": 3, "type": "mixed"},     # Far SE
+		{"pos": Vector3(-700, 0, 700), "size": 3, "type": "mixed"},    # Far SW
+		{"pos": Vector3(700, 0, -700), "size": 3, "type": "mixed"},    # Far NE
+		{"pos": Vector3(-700, 0, -700), "size": 3, "type": "mixed"},   # Far NW
+
+		# FRONTIER PATROLS (scattered between outer ring and factories)
+		{"pos": Vector3(550, 0, 250), "size": 2, "type": "patrol"},    # SE frontier 1
+		{"pos": Vector3(250, 0, 550), "size": 2, "type": "patrol"},    # SE frontier 2
+		{"pos": Vector3(-550, 0, 250), "size": 2, "type": "patrol"},   # SW frontier 1
+		{"pos": Vector3(-250, 0, 550), "size": 2, "type": "patrol"},   # SW frontier 2
+		{"pos": Vector3(550, 0, -250), "size": 2, "type": "patrol"},   # NE frontier 1
+		{"pos": Vector3(250, 0, -550), "size": 2, "type": "patrol"},   # NE frontier 2
+		{"pos": Vector3(-550, 0, -250), "size": 2, "type": "patrol"},  # NW frontier 1
+		{"pos": Vector3(-250, 0, -550), "size": 2, "type": "patrol"},  # NW frontier 2
 	]
 
 	var total_spawned := 0
@@ -6087,10 +8660,10 @@ func _spawn_human_city_patrols() -> void:
 		var group_size: int = patrol.size
 		var patrol_type: String = patrol.type
 
-		# Skip positions too close to faction factories
+		# Skip positions too close to faction factories (now at ±1000)
 		var too_close_to_factory := false
-		for factory_pos in [Vector3(-500, 0, 0), Vector3(500, 0, 0), Vector3(0, 0, -500), Vector3(0, 0, 500)]:
-			if base_pos.distance_to(factory_pos) < 80.0:
+		for factory_pos in [Vector3(-1000, 0, 0), Vector3(1000, 0, 0), Vector3(0, 0, -1000), Vector3(0, 0, 1000)]:
+			if base_pos.distance_to(factory_pos) < 120.0:
 				too_close_to_factory = true
 				break
 
@@ -6360,9 +8933,8 @@ func _fire_mortar(target_pos: Vector3) -> void:
 	}
 	_incoming_mortars.append(mortar)
 
-	# Play mortar launch sound
-	if _should_play_sound():
-		_play_laser_sound(mortar_start)
+	# Play mortar launch BOOM sound
+	_play_mortar_fire_sound(mortar_start)
 
 	# Spawn floating text warning
 	_spawn_floating_text(target_pos + Vector3(0, 5, 0), "INCOMING!", Color(1.0, 0.2, 0.0), 1.0)
@@ -6453,37 +9025,72 @@ func _update_incoming_mortars(delta: float) -> void:
 ## Create the visible mortar projectile.
 func _create_mortar_projectile(mortar: Dictionary) -> Node3D:
 	var proj := CSGSphere3D.new()
-	proj.radius = 2.0
+	proj.radius = 2.5
 
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.3, 0.3, 0.3)
+	mat.albedo_color = Color(0.2, 0.2, 0.2)
+	mat.metallic = 0.8
 	mat.emission_enabled = true
-	mat.emission = Color(1.0, 0.5, 0.0)
-	mat.emission_energy_multiplier = 2.0
+	mat.emission = Color(1.0, 0.4, 0.0)
+	mat.emission_energy_multiplier = 3.0
 	proj.material = mat
 
-	# Add trail
-	var trail := GPUParticles3D.new()
-	trail.emitting = true
-	trail.amount = 30
-	trail.lifetime = 0.5
-	trail.local_coords = false
+	# Add fire/spark trail (bright orange sparks)
+	var fire_trail := GPUParticles3D.new()
+	fire_trail.emitting = true
+	fire_trail.amount = 40
+	fire_trail.lifetime = 0.4
+	fire_trail.local_coords = false
 
-	var trail_mat := ParticleProcessMaterial.new()
-	trail_mat.direction = Vector3(0, 1, 0)
-	trail_mat.spread = 10.0
-	trail_mat.initial_velocity_min = 2.0
-	trail_mat.initial_velocity_max = 5.0
-	trail_mat.gravity = Vector3(0, 0, 0)
-	trail_mat.color = Color(1.0, 0.6, 0.2)
-	trail.process_material = trail_mat
+	var fire_mat := ParticleProcessMaterial.new()
+	fire_mat.direction = Vector3(0, 1, 0)
+	fire_mat.spread = 15.0
+	fire_mat.initial_velocity_min = 3.0
+	fire_mat.initial_velocity_max = 8.0
+	fire_mat.gravity = Vector3(0, -2, 0)
+	fire_mat.scale_min = 0.8
+	fire_mat.scale_max = 1.5
+	fire_mat.color = Color(1.0, 0.5, 0.1)
+	fire_trail.process_material = fire_mat
 
-	var mesh := SphereMesh.new()
-	mesh.radius = 0.5
-	mesh.height = 1.0
-	trail.draw_pass_1 = mesh
+	var fire_mesh := SphereMesh.new()
+	fire_mesh.radius = 0.4
+	fire_mesh.height = 0.8
+	fire_trail.draw_pass_1 = fire_mesh
+	proj.add_child(fire_trail)
 
-	proj.add_child(trail)
+	# Add SMOKE TRAIL (dark smoke that lingers)
+	var smoke_trail := GPUParticles3D.new()
+	smoke_trail.emitting = true
+	smoke_trail.amount = 60
+	smoke_trail.lifetime = 1.5  # Longer lasting smoke
+	smoke_trail.local_coords = false
+
+	var smoke_mat := ParticleProcessMaterial.new()
+	smoke_mat.direction = Vector3(0, 1, 0)
+	smoke_mat.spread = 25.0
+	smoke_mat.initial_velocity_min = 1.0
+	smoke_mat.initial_velocity_max = 4.0
+	smoke_mat.gravity = Vector3(0, 2, 0)  # Smoke rises
+	smoke_mat.scale_min = 1.5
+	smoke_mat.scale_max = 4.0
+	# Smoke starts gray, fades to transparent
+	smoke_mat.color = Color(0.3, 0.3, 0.3, 0.7)
+	smoke_trail.process_material = smoke_mat
+
+	var smoke_mesh := SphereMesh.new()
+	smoke_mesh.radius = 1.0
+	smoke_mesh.height = 2.0
+	smoke_trail.draw_pass_1 = smoke_mesh
+
+	# Smoke material with transparency
+	var smoke_draw_mat := StandardMaterial3D.new()
+	smoke_draw_mat.albedo_color = Color(0.2, 0.2, 0.2, 0.5)
+	smoke_draw_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	smoke_draw_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	smoke_mesh.material = smoke_draw_mat
+	proj.add_child(smoke_trail)
+
 	_projectile_container.add_child(proj)
 
 	return proj
@@ -6528,12 +9135,30 @@ func _mortar_impact(mortar: Dictionary) -> void:
 			# Spawn damage number
 			_spawn_damage_number(unit.global_position, damage)
 
-	# Screen shake
-	_camera_shake(0.5, 10.0)
+	# Deal damage to buildings in splash radius
+	if _city_renderer != null and _city_renderer.has_method("get_building_at_position"):
+		# Check multiple points in the splash radius
+		var check_offsets := [
+			Vector3.ZERO,
+			Vector3(MORTAR_SPLASH_RADIUS * 0.5, 0, 0),
+			Vector3(-MORTAR_SPLASH_RADIUS * 0.5, 0, 0),
+			Vector3(0, 0, MORTAR_SPLASH_RADIUS * 0.5),
+			Vector3(0, 0, -MORTAR_SPLASH_RADIUS * 0.5),
+		]
+		var damaged_building_ids: Array[int] = []
+		for offset in check_offsets:
+			var check_pos: Vector3 = impact_pos + offset
+			var building_id: int = _city_renderer.get_building_at_position(check_pos, 5.0)
+			if building_id >= 0 and building_id not in damaged_building_ids:
+				damaged_building_ids.append(building_id)
+				# Heavy building damage from mortar
+				_city_renderer.damage_building(building_id, MORTAR_DAMAGE * 1.5, check_pos)
 
-	# Play explosion sound
-	if _should_play_sound():
-		_play_explosion_sound(impact_pos)
+	# Screen shake - big shake for mortar!
+	_camera_shake(0.8, 15.0)
+
+	# Play BIG mortar impact explosion sound
+	_play_explosion_sound(impact_pos, 2.5)  # Large explosion
 
 
 ## Create mortar explosion effect.
@@ -6710,9 +9335,17 @@ func _process(delta: float) -> void:
 	_update_camera_shake(delta)
 	_handle_production_input()
 
+	# Update pathfinding bridge (batches navmesh updates)
+	if _pathfinding_bridge != null:
+		_pathfinding_bridge.process(delta)
+
 	# Rotate faction info viewer models
 	if _faction_info_visible and not _faction_info_models.is_empty():
 		_update_faction_info_models(delta)
+
+	# Update unit spec popup animations
+	if _unit_spec_visible:
+		_update_combat_preview(delta)
 
 	if GameStateManager.get_match_status() == GameStateManager.MatchStatus.ACTIVE:
 		# Track match time
@@ -6724,6 +9357,10 @@ func _process(delta: float) -> void:
 			_autosave_timer = 0.0
 			_perform_autosave()
 
+		# Visibility culling - FIRST, before any rendering updates
+		# This hides off-screen units to save rendering cost (CSG is expensive!)
+		_update_visibility_culling()
+
 		# Critical updates - every frame
 		_update_units(delta)
 		_update_combat(delta)
@@ -6731,9 +9368,11 @@ func _process(delta: float) -> void:
 		_update_explosions(delta)
 		_update_production(delta)
 		_update_wreckage(delta)  # Decay old wreckage
+		_update_unit_ejections(delta)  # Unit ejection animations from factories
 		_update_harvesters(delta)  # Harvester AI for collecting REE
 		_update_faction_ai(delta)  # AI faction spawning and attacks
 		_update_human_remnant(delta)  # Human Remnant NPC faction
+		_update_ruins(delta)  # Age and cleanup building ruins
 
 		# Player passive income (same as AI)
 		if ResourceManager:
@@ -6756,6 +9395,8 @@ func _process(delta: float) -> void:
 		_update_kill_feed()
 		_update_match_timer()
 		_update_control_group_badges()
+		_update_unit_overview_panel()  # Army overview on right side
+		_update_factory_production_panel()  # Factory menu when selected
 		_update_pings()
 		_update_attack_move_indicator()
 		_update_queue_mode_indicator()
@@ -6765,6 +9406,28 @@ func _process(delta: float) -> void:
 		_update_unit_count_display()
 		_update_ree_stats_display()
 		_cleanup_dead_units()
+
+		# Update MultiMesh batched rendering (process dirty transforms)
+		if _multimesh_renderer != null and _use_multimesh_rendering:
+			_multimesh_renderer.update_multimesh_rendering()
+
+		# Update LOD system with camera position and process LOD changes
+		if _lod_system != null and camera != null:
+			_lod_system.set_camera_position(camera.global_position)
+			_lod_system.update(delta)
+
+		# Update voxel system with camera position for LOD and streaming
+		if _voxel_system != null and camera != null:
+			_voxel_system.set_camera_position(camera.global_position)
+			# Also set frustum planes for culling
+			_voxel_system.set_camera_frustum(camera.get_frustum())
+
+		# Advance performance tier system frame counter and update tiers periodically
+		if _performance_tier_system != null and _use_performance_tiers:
+			_performance_tier_system.advance_frame()
+			# Update tier assignments every 30 frames (~0.5s at 60fps)
+			if _frame_count % 30 == 0:
+				_performance_tier_system.update_tiers()
 
 		# Process Hive Mind XP updates (thread-safe batched)
 		if _experience_pool != null:
@@ -6790,7 +9453,9 @@ func _process(delta: float) -> void:
 			_update_faction_mechanics(delta * FOG_UPDATE_INTERVAL)
 			_update_factory_combat(delta * FOG_UPDATE_INTERVAL)
 			_update_power_grid(delta * FOG_UPDATE_INTERVAL)
+			_update_power_grid_overlay()  # Update power grid overlay UI if visible
 			_update_districts(delta * FOG_UPDATE_INTERVAL)
+			_update_factory_construction(delta * FOG_UPDATE_INTERVAL)
 			_check_victory_defeat()
 
 	# Debug info - heavily throttled
@@ -7059,18 +9724,19 @@ func _update_production(delta: float) -> void:
 		if _current_production.progress >= _current_production.total_time:
 			# Production complete - spawn unit with factory bonuses
 			var unit_class: String = _current_production.unit_class
-			var spawn_pos: Vector3 = FACTORY_POSITIONS[1] + Vector3(randf_range(-15, 15), 0, randf_range(-15, 15))
-			var new_unit: Dictionary = _spawn_faction_unit(1, spawn_pos, unit_class)
+			var factory_pos: Vector3 = FACTORY_POSITIONS[_player_faction]
+			var spawn_pos: Vector3 = factory_pos + Vector3(randf_range(-15, 15), 0, randf_range(-15, 15))
+			var new_unit: Dictionary = _spawn_faction_unit(_player_faction, spawn_pos, unit_class)
 
 			# Apply factory upgrade bonuses to new unit
-			var health_mult: float = _get_factory_health_multiplier(1)
-			var damage_mult: float = _get_factory_damage_multiplier(1)
+			var health_mult: float = _get_factory_health_multiplier(_player_faction)
+			var damage_mult: float = _get_factory_damage_multiplier(_player_faction)
 			new_unit.max_health *= health_mult
 			new_unit.health = new_unit.max_health
 			new_unit.damage = new_unit.get("damage", 10.0) * damage_mult
 
 			# Send unit to rally point if set
-			var rally_point: Vector3 = _get_rally_point(1)
+			var rally_point: Vector3 = _get_rally_point(_player_faction)
 			if rally_point != Vector3.ZERO:
 				new_unit.target_pos = rally_point
 
@@ -7081,7 +9747,19 @@ func _update_production(delta: float) -> void:
 			_play_unit_ready_sound()
 
 			# Spawn factory production effect
-			_spawn_factory_production_effect(FACTORY_POSITIONS[_player_faction], _player_faction)
+			_spawn_factory_production_effect(factory_pos, _player_faction)
+
+			# Start unit ejection animation from factory to spawn position
+			if _unit_ejection_animation != null and new_unit.has("mesh") and is_instance_valid(new_unit.mesh):
+				var ejection_id: int = _unit_ejection_animation.start_ejection(
+					new_unit.mesh,
+					factory_pos,
+					spawn_pos,
+					_player_faction,
+					_effects_container
+				)
+				if ejection_id >= 0:
+					_pending_ejections[ejection_id] = new_unit
 
 			_current_production.clear()
 
@@ -7090,6 +9768,14 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed:
 		# Handle ESC - close overlays first, then pause
 		if event.keycode == KEY_ESCAPE:
+			# Cancel factory placement mode if active
+			if _construction_placement_mode:
+				cancel_factory_placement()
+				return
+			# Close unit spec popup if open
+			if _unit_spec_visible:
+				_hide_unit_spec_popup()
+				return
 			# Close faction info viewer if open
 			if _faction_info_visible:
 				_hide_faction_info()
@@ -7144,27 +9830,40 @@ func _input(event: InputEvent) -> void:
 				_activate_acrobatic_strike()
 			KEY_V:
 				_activate_coordinated_barrage()
-			# Production keys
+			KEY_N:
+				# N = New factory (enter placement mode)
+				if GameStateManager.get_match_status() == GameStateManager.MatchStatus.ACTIVE:
+					start_factory_placement()
+			# Control group keys (Ctrl+# to save, # to recall)
+			# Production only works with Shift+# when factory is selected
 			KEY_1:
 				if event.ctrl_pressed:
 					_save_control_group(1)
-				else:
-					_queue_unit_production("light")
+				elif event.shift_pressed and _factory_selected:
+					_queue_unit_production("light")  # Shift+1 produces (factory must be selected)
+				elif _has_control_group(1):
+					_recall_control_group(1)
 			KEY_2:
 				if event.ctrl_pressed:
 					_save_control_group(2)
-				else:
-					_queue_unit_production("medium")
+				elif event.shift_pressed and _factory_selected:
+					_queue_unit_production("medium")  # Shift+2 produces (factory must be selected)
+				elif _has_control_group(2):
+					_recall_control_group(2)
 			KEY_3:
 				if event.ctrl_pressed:
 					_save_control_group(3)
-				else:
-					_queue_unit_production("heavy")
+				elif event.shift_pressed and _factory_selected:
+					_queue_unit_production("heavy")  # Shift+3 produces (factory must be selected)
+				elif _has_control_group(3):
+					_recall_control_group(3)
 			KEY_4:
 				if event.ctrl_pressed:
 					_save_control_group(4)
-				else:
-					_queue_unit_production("harvester")
+				elif event.shift_pressed and _factory_selected:
+					_queue_unit_production("harvester")  # Shift+4 produces (factory must be selected)
+				elif _has_control_group(4):
+					_recall_control_group(4)
 			KEY_5, KEY_6, KEY_7, KEY_8, KEY_9:
 				var group_num: int = event.keycode - KEY_0
 				if event.ctrl_pressed:
@@ -7188,7 +9887,10 @@ func _input(event: InputEvent) -> void:
 			KEY_R:
 				_set_rally_point_mode()
 			KEY_P:
-				_start_patrol_mode()
+				if event.ctrl_pressed:
+					_toggle_power_grid_overlay()
+				else:
+					_start_patrol_mode()
 			KEY_G:
 				_start_guard_mode()
 			KEY_Z:
@@ -7245,6 +9947,15 @@ func _input(event: InputEvent) -> void:
 			_show_range_circles = event.pressed
 
 	if event is InputEventMouseButton:
+		# Handle factory placement mode first
+		if _construction_placement_mode:
+			if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+				_confirm_factory_placement()
+				return
+			elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
+				cancel_factory_placement()
+				return
+
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_zoom_camera(-CAMERA_ZOOM_STEP)  # Zoom in (reduce height)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
@@ -7267,24 +9978,43 @@ func _input(event: InputEvent) -> void:
 						_handle_left_click_with_double(_box_select_start)
 					_is_box_selecting = false
 					_hide_selection_box()
-		elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-			# Cancel box selection on right click
-			if _is_box_selecting:
-				_is_box_selecting = false
-				_hide_selection_box()
-			elif _attack_move_mode:
-				_handle_attack_move_click(event.position)
-				_attack_move_mode = false
-			elif _rally_point_mode:
-				_set_rally_point(event.position)
-				_rally_point_mode = false
-			elif _patrol_mode:
-				_add_patrol_waypoint(event.position)
-			elif _guard_mode:
-				_handle_guard_click(event.position)
-				_guard_mode = false
+		elif event.button_index == MOUSE_BUTTON_RIGHT:
+			if event.pressed:
+				# Right mouse pressed - start potential drag formation
+				if _is_box_selecting:
+					_is_box_selecting = false
+					_hide_selection_box()
+				elif _attack_move_mode or _rally_point_mode or _patrol_mode or _guard_mode:
+					# Handle special modes immediately
+					if _attack_move_mode:
+						_handle_attack_move_click(event.position)
+						_attack_move_mode = false
+					elif _rally_point_mode:
+						_set_rally_point(event.position)
+						_rally_point_mode = false
+					elif _patrol_mode:
+						_add_patrol_waypoint(event.position)
+					elif _guard_mode:
+						_handle_guard_click(event.position)
+						_guard_mode = false
+				else:
+					# Start drag formation tracking
+					_is_drag_forming = true
+					_drag_form_start = event.position
+					_drag_form_end = event.position
+					_drag_form_world_start = _screen_to_world(event.position)
 			else:
-				_handle_right_click(event.position)
+				# Right mouse released - finish drag or click
+				if _is_drag_forming:
+					var drag_distance := _drag_form_start.distance_to(_drag_form_end)
+					if drag_distance >= DRAG_FORM_THRESHOLD and _selected_units.size() > 0:
+						# Execute drag formation move
+						_execute_drag_formation()
+					else:
+						# Was just a click - do normal right-click action
+						_handle_right_click(_drag_form_start)
+					_is_drag_forming = false
+					_clear_drag_formation_preview()
 		elif event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 			# Cancel command modes on left click
 			if _attack_move_mode:
@@ -7299,6 +10029,15 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and _is_box_selecting:
 		_box_select_end = event.position
 		_update_selection_box_visual()
+
+	# Update factory placement preview
+	if event is InputEventMouseMotion and _construction_placement_mode:
+		_update_factory_placement(event.position)
+
+	# Update drag formation preview
+	if event is InputEventMouseMotion and _is_drag_forming:
+		_drag_form_end = event.position
+		_update_drag_formation_preview()
 
 
 func _start_match() -> void:
@@ -7874,6 +10613,16 @@ func _setup_factories() -> void:
 			# Setup power grid for this factory
 			_setup_factory_power(faction_id)
 
+	# Initialize factory construction system
+	_factory_construction = FactoryConstruction.new()
+	for faction_id in _factories:
+		var factory: Dictionary = _factories[faction_id]
+		_factory_construction.register_factory(factory.position, faction_id)
+	_factory_construction.construction_started.connect(_on_construction_started)
+	_factory_construction.construction_progress.connect(_on_construction_progress)
+	_factory_construction.construction_completed.connect(_on_construction_completed)
+	print("  FactoryConstruction: OK (builder-based factory building)")
+
 
 func _create_factory_health_bar(faction_id: int) -> Node3D:
 	var bar := Node3D.new()
@@ -8073,6 +10822,16 @@ func _setup_districts() -> void:
 			# Create visual indicator for district
 			_create_district_visual(district)
 
+	# Create territory ownership overlay (ground tinting)
+	_district_overlay = DistrictOverlay.new()
+	add_child(_district_overlay)
+	# Sync initial ownership
+	for district in _districts:
+		var dx: int = district.grid_x
+		var dz: int = district.grid_y
+		_district_overlay.set_district_owner(dx, dz, district.owner)
+	print("  DistrictOverlay: OK (territory ground tinting)")
+
 
 ## Create visual indicator for a district.
 func _create_district_visual(district: Dictionary) -> void:
@@ -8197,6 +10956,9 @@ func _update_districts(delta: float) -> void:
 					district.capture_progress.clear()
 					_track_stat(dominant_faction, "districts_captured")
 					print("District %d captured by faction %d!" % [district_id, dominant_faction])
+					# Update territory overlay
+					if _district_overlay:
+						_district_overlay.set_district_owner(district.grid_x, district.grid_y, dominant_faction)
 			else:
 				# Decay all capture progress
 				for faction_id in district.capture_progress.keys():
@@ -8218,12 +10980,19 @@ func _update_districts(delta: float) -> void:
 					district.owner = 0
 					district.control_level = 0.0
 					print("District %d lost by faction %d!" % [district_id, old_owner])
+					# Update territory overlay
+					if _district_overlay:
+						_district_overlay.set_district_owner(district.grid_x, district.grid_y, 0)
 			elif owner_units > 0:
 				# Owner defending - restore control
 				district.control_level = minf(1.0, district.control_level + DISTRICT_CAPTURE_RATE * delta)
 
 		# Update visual
 		_update_district_visual(district)
+
+	# Update territory overlay animations
+	if _district_overlay:
+		_district_overlay.update(delta)
 
 	# Generate passive income from controlled districts
 	_generate_district_income(delta)
@@ -8328,9 +11097,9 @@ func _spawn_initial_units() -> void:
 				var offset := Vector3(randf_range(-12, 12), 0, randf_range(-12, 12))
 				_spawn_faction_unit(faction_id, base_pos + offset, unit_type)
 
-		# Also spawn 1 harvester for each faction
+		# Also spawn 1 harvester for each faction (using faction-specific template)
 		var offset := Vector3(randf_range(-8, 8), 0, randf_range(-8, 8))
-		_spawn_unit(faction_id, base_pos + offset, "harvester")
+		_spawn_faction_unit(faction_id, base_pos + offset, "harvester")
 
 	print("Spawned %d initial units" % _units.size())
 
@@ -8340,6 +11109,15 @@ func _spawn_faction_unit(faction_id: int, position: Vector3, weight_class: Strin
 	var template_id := ""
 	var faction_templates: Dictionary = FACTION_UNIT_TEMPLATES.get(faction_id, {})
 	template_id = faction_templates.get(weight_class, "")
+
+	# Special handling for harvester - use faction-specific harvester template
+	if weight_class == "harvester":
+		match faction_id:
+			1: template_id = "aether_swarm_nano_reaplet"
+			2: template_id = "optiforge_repair_drone"
+			3: template_id = "dynapods_quadripper"
+			4: template_id = "logibots_bulkripper"
+			5: template_id = "human_soldier"  # Humans don't have dedicated harvesters
 
 	# Try to get unit stats from UnitTemplateManager
 	var template: UnitTemplate = null
@@ -8355,6 +11133,7 @@ func _spawn_faction_unit(faction_id: int, position: Vector3, weight_class: Strin
 			"light": fallback_type = "scout"
 			"medium": fallback_type = "soldier"
 			"heavy": fallback_type = "tank"
+			"harvester": fallback_type = "harvester"
 		return _spawn_unit(faction_id, position, fallback_type)
 
 
@@ -8379,17 +11158,24 @@ func _spawn_unit_from_template(faction_id: int, position: Vector3, template: Uni
 	var scale_factor := sqrt(health / 100.0)  # Normalize around 100 HP
 	var base_size := Vector3(1.5, 2.0, 1.5) * scale_factor
 
-	# Create visual mesh
-	var mesh := CSGBox3D.new()
-	mesh.size = base_size
+	# Map template unit_type to procedural bot type
+	var bot_type: String = template.unit_type
+	if bot_type == "light":
+		bot_type = "scout"
+	elif bot_type == "medium":
+		bot_type = "soldier"
+	elif bot_type == "heavy":
+		bot_type = "tank"
+
+	# Get type data for procedural bot
+	var type_data: Dictionary = UNIT_TYPES.get(bot_type, UNIT_TYPES.get("soldier", {}))
+	type_data = type_data.duplicate()
+	type_data["size"] = base_size  # Override size based on template health
+
+	# Create procedural bot visual instead of simple box
+	var mesh := _create_procedural_bot(faction_id, bot_type, type_data)
 	mesh.position = spawn_pos
 	mesh.position.y = base_size.y / 2.0
-
-	var material := StandardMaterial3D.new()
-	material.albedo_color = FACTION_COLORS.get(faction_id, Color.WHITE)
-	material.emission_enabled = true
-	material.emission = FACTION_COLORS.get(faction_id, Color.WHITE) * 0.4
-	mesh.material = material
 
 	_unit_container.add_child(mesh)
 
@@ -8468,7 +11254,64 @@ func _spawn_unit_from_template(faction_id: int, position: Vector3, template: Uni
 	if faction_id == 4 and _coordinated_barrage != null:
 		_coordinated_barrage.register_unit(unit_id)
 
+	# Register with MultiMesh rendering system for batched draw calls
+	if _multimesh_renderer != null and _use_multimesh_rendering:
+		# Map faction_id to MultiMeshRenderer faction constants (0-4)
+		var mm_faction_id := faction_id - 1  # main.gd uses 1-5, MultiMesh uses 0-4
+		mm_faction_id = clampi(mm_faction_id, 0, 4)
+		var mm_unit_type := _map_template_to_multimesh_type(template.unit_type, faction_id)
+		_multimesh_renderer.register_unit(unit_id, mm_faction_id, mm_unit_type, mesh.global_transform)
+		# Hide individual mesh - MultiMesh handles rendering
+		mesh.visible = false
+
+	# Register with LOD system for visual detail management
+	if _lod_system != null:
+		_lod_system.register_unit(unit_id, spawn_pos)
+
+	# Register with performance tier system for AI update throttling
+	if _performance_tier_system != null and _use_performance_tiers:
+		_performance_tier_system.register_unit(unit_id)
+
 	return unit
+
+
+## Maps template unit types to MultiMeshRenderer mesh types for batched rendering.
+func _map_template_to_multimesh_type(template_type: String, faction_id: int) -> String:
+	# MultiMeshRenderer has faction-specific mesh types
+	# Map our template types (light, medium, heavy) to appropriate faction meshes
+	match faction_id:
+		1:  # Aether Swarm
+			match template_type:
+				"light": return "drone"
+				"medium": return "scout"
+				"heavy": return "phaser"
+				_: return "drone"
+		2:  # OptiForge Legion
+			match template_type:
+				"light": return "grunt"
+				"medium": return "soldier"
+				"heavy": return "heavy"
+				_: return "soldier"
+		3:  # Dynapods Vanguard
+			match template_type:
+				"light": return "runner"
+				"medium": return "striker"
+				"heavy": return "juggernaut"
+				_: return "striker"
+		4:  # LogiBots Colossus
+			match template_type:
+				"light": return "worker"
+				"medium": return "defender"
+				"heavy": return "titan"
+				_: return "defender"
+		5:  # Human Remnant
+			match template_type:
+				"light": return "soldier"
+				"medium": return "heavy"
+				"heavy": return "vehicle"
+				_: return "soldier"
+		_:
+			return "soldier"
 
 
 func _spawn_player_reinforcements() -> void:
@@ -8843,8 +11686,8 @@ func _update_blink_effects() -> void:
 			unit["_low_health_blinking"] = false
 
 
-## Create a procedural bot mesh based on faction and unit type.
-## Using Node3D instead of CSGCombiner3D - CSG children render fine without boolean combining
+## Create highly detailed procedural bot models per faction AND unit type.
+## DETAILED: 8-15 CSG nodes per unit for rich visual variety and faction identity.
 func _create_procedural_bot(faction_id: int, unit_type: String, type_data: Dictionary) -> Node3D:
 	var root := Node3D.new()
 	root.name = "Bot_%d_%s" % [faction_id, unit_type]
@@ -8852,1709 +11695,890 @@ func _create_procedural_bot(faction_id: int, unit_type: String, type_data: Dicti
 	var base_size: Vector3 = type_data.get("size", Vector3(1.5, 2.0, 1.5))
 	var faction_color: Color = FACTION_COLORS.get(faction_id, Color.WHITE)
 
-	# Create base material
+	# Create base material with better metallic look
 	var base_mat := StandardMaterial3D.new()
-	base_mat.emission_enabled = true
-
-	# Special case for harvesters - faction-specific collector designs
-	if unit_type == "harvester":
-		_add_harvester_parts(root, base_size, base_mat, faction_id, faction_color)
-		return root
-
 	base_mat.albedo_color = faction_color
-	base_mat.emission = faction_color * 0.4
+	base_mat.emission_enabled = true
+	base_mat.emission = faction_color * 0.35
+	base_mat.metallic = 0.7
+	base_mat.roughness = 0.35
 
-	# Different visual styles per faction
+	# Glow material for eyes/sensors/weapons
+	var glow_mat := StandardMaterial3D.new()
+	glow_mat.emission_enabled = true
+	glow_mat.emission_energy_multiplier = 2.5
+
+	# Dark accent material for details
+	var dark_mat := StandardMaterial3D.new()
+	dark_mat.albedo_color = faction_color * 0.4
+	dark_mat.metallic = 0.85
+	dark_mat.roughness = 0.25
+
+	# Highlight material for trim/accents
+	var highlight_mat := StandardMaterial3D.new()
+	highlight_mat.albedo_color = faction_color.lightened(0.3)
+	highlight_mat.metallic = 0.9
+	highlight_mat.roughness = 0.2
+	highlight_mat.emission_enabled = true
+	highlight_mat.emission = faction_color * 0.2
+
+	# Build detailed models per faction + unit type
 	match faction_id:
-		1:  # Aether Swarm - sleek, angular drones
-			_add_aether_swarm_parts(root, base_size, base_mat, unit_type)
-		2:  # OptiForge Legion - humanoid, industrial
-			_add_optiforge_parts(root, base_size, base_mat, unit_type)
-		3:  # Dynapods Vanguard - agile, multi-legged
-			_add_dynapods_parts(root, base_size, base_mat, unit_type)
-		4:  # LogiBots Colossus - heavy, tank-like
-			_add_logibots_parts(root, base_size, base_mat, unit_type)
-		5:  # Human Remnant - military vehicles and infantry
-			_add_human_remnant_parts(root, base_size, base_mat, unit_type)
-		_:  # Default simple bot
+		1:  # AETHER SWARM - Sleek cyber-drones with phasing tech
+			glow_mat.albedo_color = Color(0.3, 0.95, 1.0)
+			glow_mat.emission = Color(0.3, 0.95, 1.0)
+			match unit_type:
+				"scout", "light":  # Wasp Interceptor - agile micro-drone
+					# Streamlined fuselage
+					var body := CSGCylinder3D.new()
+					body.radius = base_size.x * 0.12
+					body.height = base_size.z * 0.65
+					body.rotation.x = PI / 2
+					body.material = base_mat
+					root.add_child(body)
+					# Thorax segment
+					var thorax := CSGSphere3D.new()
+					thorax.radius = base_size.x * 0.14
+					thorax.material = base_mat
+					root.add_child(thorax)
+					# Wing pairs (4 wings)
+					for wing_pair in [0.18, -0.08]:
+						for side in [-1, 1]:
+							var wing := CSGBox3D.new()
+							wing.size = Vector3(base_size.x * 0.55, 0.015, base_size.z * 0.18)
+							wing.position = Vector3(base_size.x * 0.28 * side, wing_pair * base_size.y, 0)
+							wing.rotation.z = side * 0.25
+							wing.rotation.y = side * 0.1
+							wing.material = highlight_mat
+							root.add_child(wing)
+					# Compound eyes
+					for side in [-1, 1]:
+						var eye := CSGSphere3D.new()
+						eye.radius = base_size.x * 0.08
+						eye.position = Vector3(base_size.x * 0.06 * side, base_size.y * 0.05, base_size.z * 0.22)
+						eye.material = glow_mat
+						root.add_child(eye)
+					# Stinger
+					var stinger := CSGCylinder3D.new()
+					stinger.radius = base_size.x * 0.025
+					stinger.height = base_size.z * 0.2
+					stinger.rotation.x = PI / 2
+					stinger.position.z = -base_size.z * 0.35
+					stinger.material = dark_mat
+					root.add_child(stinger)
+
+				"soldier", "medium":  # Phase Wraith - phasing combat drone
+					# Diamond-cut main body
+					var body := CSGBox3D.new()
+					body.size = Vector3(base_size.x * 0.55, base_size.y * 0.45, base_size.z * 0.65)
+					body.rotation.y = PI / 4
+					body.material = base_mat
+					root.add_child(body)
+					# Central power core
+					var core := CSGSphere3D.new()
+					core.radius = base_size.x * 0.16
+					core.position.y = base_size.y * 0.18
+					core.material = glow_mat
+					root.add_child(core)
+					# Phase emitter panels
+					for side in [-1, 1]:
+						var panel := CSGBox3D.new()
+						panel.size = Vector3(0.06, base_size.y * 0.42, base_size.z * 0.5)
+						panel.position.x = base_size.x * 0.42 * side
+						panel.rotation.z = side * 0.35
+						panel.material = highlight_mat
+						root.add_child(panel)
+						# Panel glow strips
+						var strip := CSGBox3D.new()
+						strip.size = Vector3(0.02, base_size.y * 0.38, base_size.z * 0.08)
+						strip.position = Vector3(base_size.x * 0.44 * side, 0, base_size.z * 0.15)
+						strip.material = glow_mat
+						root.add_child(strip)
+					# Sensor array
+					var sensor := CSGCylinder3D.new()
+					sensor.radius = base_size.x * 0.08
+					sensor.height = base_size.y * 0.12
+					sensor.position.y = base_size.y * 0.35
+					sensor.material = dark_mat
+					root.add_child(sensor)
+					# Weapon pods
+					for side in [-1, 1]:
+						var pod := CSGCylinder3D.new()
+						pod.radius = base_size.x * 0.05
+						pod.height = base_size.z * 0.25
+						pod.rotation.x = PI / 2
+						pod.position = Vector3(base_size.x * 0.25 * side, -base_size.y * 0.1, base_size.z * 0.25)
+						pod.material = dark_mat
+						root.add_child(pod)
+
+				"tank", "heavy":  # Void Carrier - massive support platform
+					# Hexagonal main hull
+					var hull := CSGCylinder3D.new()
+					hull.radius = base_size.x * 0.5
+					hull.height = base_size.y * 0.32
+					hull.sides = 6
+					hull.material = base_mat
+					root.add_child(hull)
+					# Upper dome
+					var dome := CSGSphere3D.new()
+					dome.radius = base_size.x * 0.32
+					dome.position.y = base_size.y * 0.22
+					dome.material = base_mat
+					root.add_child(dome)
+					# Central reactor core
+					var core := CSGSphere3D.new()
+					core.radius = base_size.x * 0.22
+					core.position.y = base_size.y * 0.38
+					core.material = glow_mat
+					root.add_child(core)
+					# Drone bay hatches
+					for angle_idx in 6:
+						var angle := angle_idx * TAU / 6
+						var hatch := CSGBox3D.new()
+						hatch.size = Vector3(base_size.x * 0.15, 0.04, base_size.z * 0.12)
+						hatch.position = Vector3(cos(angle) * base_size.x * 0.38, base_size.y * 0.18, sin(angle) * base_size.z * 0.38)
+						hatch.rotation.y = angle
+						hatch.material = dark_mat
+						root.add_child(hatch)
+					# Hover emitters
+					for side in [-1, 1]:
+						for fwd in [-1, 1]:
+							var emitter := CSGCylinder3D.new()
+							emitter.radius = base_size.x * 0.08
+							emitter.height = base_size.y * 0.06
+							emitter.position = Vector3(base_size.x * 0.3 * side, -base_size.y * 0.18, base_size.z * 0.3 * fwd)
+							emitter.material = glow_mat
+							root.add_child(emitter)
+
+				"harvester":  # Collector Drone - resource gatherer
+					var body := CSGCylinder3D.new()
+					body.radius = base_size.x * 0.28
+					body.height = base_size.y * 0.45
+					body.material = base_mat
+					root.add_child(body)
+					# Collection scoop
+					var scoop := CSGBox3D.new()
+					scoop.size = Vector3(base_size.x * 0.55, base_size.y * 0.18, base_size.z * 0.35)
+					scoop.position = Vector3(0, -base_size.y * 0.22, base_size.z * 0.18)
+					scoop.material = dark_mat
+					root.add_child(scoop)
+					# Intake glow
+					var intake := CSGBox3D.new()
+					intake.size = Vector3(base_size.x * 0.45, base_size.y * 0.08, base_size.z * 0.05)
+					intake.position = Vector3(0, -base_size.y * 0.18, base_size.z * 0.38)
+					intake.material = glow_mat
+					root.add_child(intake)
+					# Storage pods
+					for side in [-1, 1]:
+						var pod := CSGSphere3D.new()
+						pod.radius = base_size.x * 0.15
+						pod.position = Vector3(base_size.x * 0.25 * side, base_size.y * 0.1, 0)
+						pod.material = highlight_mat
+						root.add_child(pod)
+				_:
+					var body := CSGCylinder3D.new()
+					body.radius = base_size.x * 0.35
+					body.height = base_size.y * 0.6
+					body.material = base_mat
+					root.add_child(body)
+
+		2:  # OPTIFORGE LEGION - Industrial humanoid war machines
+			glow_mat.albedo_color = Color(1.0, 0.35, 0.1)
+			glow_mat.emission = Color(1.0, 0.35, 0.1)
+			match unit_type:
+				"scout", "light":  # Reaper Runner - fast assault bot
+					# Torso chassis
+					var torso := CSGBox3D.new()
+					torso.size = Vector3(base_size.x * 0.38, base_size.y * 0.38, base_size.z * 0.28)
+					torso.position.y = base_size.y * 0.12
+					torso.material = base_mat
+					root.add_child(torso)
+					# Head unit
+					var head := CSGBox3D.new()
+					head.size = Vector3(base_size.x * 0.22, base_size.y * 0.16, base_size.z * 0.18)
+					head.position.y = base_size.y * 0.38
+					head.material = base_mat
+					root.add_child(head)
+					# Visor strip
+					var visor := CSGBox3D.new()
+					visor.size = Vector3(base_size.x * 0.2, base_size.y * 0.045, 0.05)
+					visor.position = Vector3(0, base_size.y * 0.4, base_size.z * 0.09)
+					visor.material = glow_mat
+					root.add_child(visor)
+					# Leg pistons
+					for side in [-1, 1]:
+						var leg := CSGCylinder3D.new()
+						leg.radius = base_size.x * 0.06
+						leg.height = base_size.y * 0.35
+						leg.position = Vector3(base_size.x * 0.12 * side, -base_size.y * 0.12, 0)
+						leg.material = dark_mat
+						root.add_child(leg)
+						# Knee joint
+						var knee := CSGSphere3D.new()
+						knee.radius = base_size.x * 0.05
+						knee.position = Vector3(base_size.x * 0.12 * side, -base_size.y * 0.08, 0)
+						knee.material = highlight_mat
+						root.add_child(knee)
+					# Arm blades
+					for side in [-1, 1]:
+						var arm := CSGBox3D.new()
+						arm.size = Vector3(base_size.x * 0.04, base_size.y * 0.28, base_size.z * 0.06)
+						arm.position = Vector3(base_size.x * 0.25 * side, base_size.y * 0.05, 0)
+						arm.material = dark_mat
+						root.add_child(arm)
+
+				"soldier", "medium":  # Iron Trooper - frontline infantry
+					# Armored torso
+					var torso := CSGBox3D.new()
+					torso.size = Vector3(base_size.x * 0.52, base_size.y * 0.42, base_size.z * 0.38)
+					torso.position.y = base_size.y * 0.1
+					torso.material = base_mat
+					root.add_child(torso)
+					# Chest plate detail
+					var chest := CSGBox3D.new()
+					chest.size = Vector3(base_size.x * 0.35, base_size.y * 0.25, base_size.z * 0.08)
+					chest.position = Vector3(0, base_size.y * 0.15, base_size.z * 0.2)
+					chest.material = highlight_mat
+					root.add_child(chest)
+					# Head with helmet
+					var head := CSGBox3D.new()
+					head.size = Vector3(base_size.x * 0.28, base_size.y * 0.18, base_size.z * 0.22)
+					head.position.y = base_size.y * 0.4
+					head.material = base_mat
+					root.add_child(head)
+					# Wide visor
+					var visor := CSGBox3D.new()
+					visor.size = Vector3(base_size.x * 0.26, base_size.y * 0.06, 0.05)
+					visor.position = Vector3(0, base_size.y * 0.42, base_size.z * 0.11)
+					visor.material = glow_mat
+					root.add_child(visor)
+					# Shoulder armor
+					for side in [-1, 1]:
+						var shoulder := CSGBox3D.new()
+						shoulder.size = Vector3(base_size.x * 0.2, base_size.y * 0.14, base_size.z * 0.32)
+						shoulder.position = Vector3(base_size.x * 0.38 * side, base_size.y * 0.26, 0)
+						shoulder.rotation.z = side * 0.15
+						shoulder.material = dark_mat
+						root.add_child(shoulder)
+					# Weapon arm
+					var weapon := CSGCylinder3D.new()
+					weapon.radius = base_size.x * 0.055
+					weapon.height = base_size.z * 0.35
+					weapon.rotation.x = PI / 2
+					weapon.position = Vector3(base_size.x * 0.32, base_size.y * 0.08, base_size.z * 0.22)
+					weapon.material = dark_mat
+					root.add_child(weapon)
+					# Legs
+					for side in [-1, 1]:
+						var leg := CSGBox3D.new()
+						leg.size = Vector3(base_size.x * 0.12, base_size.y * 0.32, base_size.z * 0.14)
+						leg.position = Vector3(base_size.x * 0.15 * side, -base_size.y * 0.18, 0)
+						leg.material = dark_mat
+						root.add_child(leg)
+
+				"tank", "heavy":  # Devastator Brute - siege powerhouse
+					# Massive torso
+					var torso := CSGBox3D.new()
+					torso.size = Vector3(base_size.x * 0.78, base_size.y * 0.52, base_size.z * 0.58)
+					torso.position.y = base_size.y * 0.1
+					torso.material = base_mat
+					root.add_child(torso)
+					# Reactor core (exposed)
+					var reactor := CSGCylinder3D.new()
+					reactor.radius = base_size.x * 0.12
+					reactor.height = base_size.y * 0.18
+					reactor.position = Vector3(0, base_size.y * 0.2, base_size.z * 0.28)
+					reactor.material = glow_mat
+					root.add_child(reactor)
+					# Hunched head
+					var head := CSGBox3D.new()
+					head.size = Vector3(base_size.x * 0.28, base_size.y * 0.16, base_size.z * 0.28)
+					head.position.y = base_size.y * 0.42
+					head.material = dark_mat
+					root.add_child(head)
+					# Multi-lens visor
+					var visor := CSGBox3D.new()
+					visor.size = Vector3(base_size.x * 0.26, base_size.y * 0.07, 0.06)
+					visor.position = Vector3(0, base_size.y * 0.42, base_size.z * 0.14)
+					visor.material = glow_mat
+					root.add_child(visor)
+					# Shoulder-mounted siege cannons
+					for side in [-1, 1]:
+						var mount := CSGBox3D.new()
+						mount.size = Vector3(base_size.x * 0.18, base_size.y * 0.12, base_size.z * 0.18)
+						mount.position = Vector3(base_size.x * 0.48 * side, base_size.y * 0.38, 0)
+						mount.material = dark_mat
+						root.add_child(mount)
+						var cannon := CSGCylinder3D.new()
+						cannon.radius = base_size.x * 0.075
+						cannon.height = base_size.z * 0.45
+						cannon.rotation.x = PI / 2
+						cannon.position = Vector3(base_size.x * 0.48 * side, base_size.y * 0.38, base_size.z * 0.28)
+						cannon.material = dark_mat
+						root.add_child(cannon)
+						# Cannon glow
+						var muzzle := CSGCylinder3D.new()
+						muzzle.radius = base_size.x * 0.05
+						muzzle.height = base_size.z * 0.04
+						muzzle.rotation.x = PI / 2
+						muzzle.position = Vector3(base_size.x * 0.48 * side, base_size.y * 0.38, base_size.z * 0.52)
+						muzzle.material = glow_mat
+						root.add_child(muzzle)
+					# Heavy legs
+					for side in [-1, 1]:
+						var leg := CSGBox3D.new()
+						leg.size = Vector3(base_size.x * 0.18, base_size.y * 0.38, base_size.z * 0.22)
+						leg.position = Vector3(base_size.x * 0.22 * side, -base_size.y * 0.22, 0)
+						leg.material = dark_mat
+						root.add_child(leg)
+
+				"harvester":  # Hauler Unit - resource transport
+					var torso := CSGBox3D.new()
+					torso.size = Vector3(base_size.x * 0.48, base_size.y * 0.38, base_size.z * 0.42)
+					torso.material = base_mat
+					root.add_child(torso)
+					var collector := CSGBox3D.new()
+					collector.size = Vector3(base_size.x * 0.62, base_size.y * 0.16, base_size.z * 0.32)
+					collector.position.y = -base_size.y * 0.22
+					collector.material = dark_mat
+					root.add_child(collector)
+					# Intake glow
+					var intake := CSGBox3D.new()
+					intake.size = Vector3(base_size.x * 0.5, base_size.y * 0.06, 0.04)
+					intake.position = Vector3(0, -base_size.y * 0.18, base_size.z * 0.18)
+					intake.material = glow_mat
+					root.add_child(intake)
+				_:
+					var body := CSGBox3D.new()
+					body.size = Vector3(base_size.x * 0.5, base_size.y * 0.6, base_size.z * 0.4)
+					body.material = base_mat
+					root.add_child(body)
+
+		3:  # DYNAPODS VANGUARD - Agile insectoid/arachnid mechs
+			glow_mat.albedo_color = Color(0.25, 1.0, 0.45)
+			glow_mat.emission = Color(0.25, 1.0, 0.45)
+			match unit_type:
+				"scout", "light":  # Shadow Stalker - fast spider scout
+					# Compact thorax
+					var body := CSGCylinder3D.new()
+					body.radius = base_size.x * 0.18
+					body.height = base_size.y * 0.28
+					body.material = base_mat
+					root.add_child(body)
+					# Head segment
+					var head := CSGSphere3D.new()
+					head.radius = base_size.x * 0.14
+					head.position = Vector3(0, base_size.y * 0.06, base_size.z * 0.14)
+					head.material = base_mat
+					root.add_child(head)
+					# Multi-eye cluster (6 eyes)
+					for eye_idx in 6:
+						var eye := CSGSphere3D.new()
+						eye.radius = base_size.x * 0.04
+						var angle := eye_idx * TAU / 6 + TAU / 12
+						eye.position = Vector3(
+							cos(angle) * base_size.x * 0.1,
+							base_size.y * 0.1,
+							base_size.z * 0.22 + sin(angle) * base_size.z * 0.05
+						)
+						eye.material = glow_mat
+						root.add_child(eye)
+					# Spider legs (4 pairs)
+					for leg_idx in 4:
+						for side in [-1, 1]:
+							var leg := CSGCylinder3D.new()
+							leg.radius = base_size.x * 0.02
+							leg.height = base_size.y * 0.22
+							var angle := (leg_idx - 1.5) * 0.4
+							leg.position = Vector3(
+								base_size.x * 0.2 * side,
+								-base_size.y * 0.05,
+								sin(angle) * base_size.z * 0.12
+							)
+							leg.rotation.z = side * 0.8
+							leg.rotation.y = angle
+							leg.material = dark_mat
+							root.add_child(leg)
+
+				"soldier", "medium":  # Razor Striker - blade-armed predator
+					# Segmented body
+					var body := CSGCylinder3D.new()
+					body.radius = base_size.x * 0.26
+					body.height = base_size.y * 0.38
+					body.material = base_mat
+					root.add_child(body)
+					var thorax := CSGSphere3D.new()
+					thorax.radius = base_size.x * 0.22
+					thorax.position.y = base_size.y * 0.18
+					thorax.material = base_mat
+					root.add_child(thorax)
+					# Carapace ridges
+					for ridge_idx in 3:
+						var ridge := CSGBox3D.new()
+						ridge.size = Vector3(base_size.x * 0.5, 0.03, base_size.z * 0.08)
+						ridge.position.y = base_size.y * (0.08 + ridge_idx * 0.08)
+						ridge.material = highlight_mat
+						root.add_child(ridge)
+					# Dual eye stalks
+					for side in [-1, 1]:
+						var stalk := CSGCylinder3D.new()
+						stalk.radius = base_size.x * 0.03
+						stalk.height = base_size.y * 0.1
+						stalk.position = Vector3(base_size.x * 0.12 * side, base_size.y * 0.32, base_size.z * 0.12)
+						stalk.rotation.x = -0.4
+						stalk.material = dark_mat
+						root.add_child(stalk)
+						var eye := CSGSphere3D.new()
+						eye.radius = base_size.x * 0.06
+						eye.position = Vector3(base_size.x * 0.12 * side, base_size.y * 0.38, base_size.z * 0.18)
+						eye.material = glow_mat
+						root.add_child(eye)
+					# Mantis blade arms
+					for side in [-1, 1]:
+						var upper_arm := CSGBox3D.new()
+						upper_arm.size = Vector3(base_size.x * 0.06, base_size.y * 0.15, base_size.z * 0.06)
+						upper_arm.position = Vector3(base_size.x * 0.32 * side, base_size.y * 0.15, base_size.z * 0.08)
+						upper_arm.material = dark_mat
+						root.add_child(upper_arm)
+						var blade := CSGBox3D.new()
+						blade.size = Vector3(0.03, base_size.y * 0.05, base_size.z * 0.38)
+						blade.position = Vector3(base_size.x * 0.35 * side, base_size.y * 0.12, base_size.z * 0.25)
+						blade.material = highlight_mat
+						root.add_child(blade)
+
+				"tank", "heavy":  # Apex Ravager - massive spider tank
+					# Bulbous main body
+					var body := CSGSphere3D.new()
+					body.radius = base_size.x * 0.42
+					body.material = base_mat
+					root.add_child(body)
+					# Armored abdomen
+					var abdomen := CSGCylinder3D.new()
+					abdomen.radius = base_size.x * 0.38
+					abdomen.height = base_size.y * 0.4
+					abdomen.position.z = -base_size.z * 0.28
+					abdomen.rotation.x = 0.2
+					abdomen.material = base_mat
+					root.add_child(abdomen)
+					# Abdomen spikes
+					for spike_idx in 4:
+						var spike := CSGCylinder3D.new()
+						spike.radius = base_size.x * 0.04
+						spike.height = base_size.y * 0.18
+						spike.position = Vector3(0, base_size.y * 0.15 + spike_idx * 0.05, -base_size.z * (0.2 + spike_idx * 0.08))
+						spike.rotation.x = -0.5
+						spike.material = dark_mat
+						root.add_child(spike)
+					# Massive eye cluster
+					var eye_base := CSGSphere3D.new()
+					eye_base.radius = base_size.x * 0.18
+					eye_base.position = Vector3(0, base_size.y * 0.28, base_size.z * 0.32)
+					eye_base.material = glow_mat
+					root.add_child(eye_base)
+					# Secondary eyes
+					for side in [-1, 1]:
+						var eye := CSGSphere3D.new()
+						eye.radius = base_size.x * 0.08
+						eye.position = Vector3(base_size.x * 0.2 * side, base_size.y * 0.22, base_size.z * 0.28)
+						eye.material = glow_mat
+						root.add_child(eye)
+					# Heavy spider legs
+					for leg_idx in 4:
+						for side in [-1, 1]:
+							var leg := CSGCylinder3D.new()
+							leg.radius = base_size.x * 0.045
+							leg.height = base_size.y * 0.38
+							var angle := (leg_idx - 1.5) * 0.35
+							leg.position = Vector3(
+								base_size.x * 0.38 * side,
+								-base_size.y * 0.08,
+								sin(angle) * base_size.z * 0.2
+							)
+							leg.rotation.z = side * 0.7
+							leg.rotation.y = angle
+							leg.material = dark_mat
+							root.add_child(leg)
+
+				"harvester":  # Scavenger Tick - resource collector
+					var body := CSGSphere3D.new()
+					body.radius = base_size.x * 0.32
+					body.material = base_mat
+					root.add_child(body)
+					var scoop := CSGBox3D.new()
+					scoop.size = Vector3(base_size.x * 0.42, base_size.y * 0.16, base_size.z * 0.28)
+					scoop.position.y = -base_size.y * 0.2
+					scoop.material = dark_mat
+					root.add_child(scoop)
+					# Mandibles
+					for side in [-1, 1]:
+						var mandible := CSGBox3D.new()
+						mandible.size = Vector3(base_size.x * 0.08, base_size.y * 0.06, base_size.z * 0.18)
+						mandible.position = Vector3(base_size.x * 0.18 * side, -base_size.y * 0.15, base_size.z * 0.22)
+						mandible.rotation.z = side * 0.3
+						mandible.material = highlight_mat
+						root.add_child(mandible)
+				_:
+					var body := CSGSphere3D.new()
+					body.radius = base_size.x * 0.4
+					body.material = base_mat
+					root.add_child(body)
+
+		4:  # LOGIBOTS COLOSSUS - Heavy industrial siege machines
+			glow_mat.albedo_color = Color(1.0, 0.92, 0.25)
+			glow_mat.emission = Color(1.0, 0.92, 0.25)
+			match unit_type:
+				"scout", "light":  # Scout Walker - reconnaissance unit
+					# Low-profile hull
+					var hull := CSGBox3D.new()
+					hull.size = Vector3(base_size.x * 0.58, base_size.y * 0.28, base_size.z * 0.68)
+					hull.material = base_mat
+					root.add_child(hull)
+					# Sensor turret
+					var turret := CSGBox3D.new()
+					turret.size = Vector3(base_size.x * 0.28, base_size.y * 0.14, base_size.z * 0.28)
+					turret.position.y = base_size.y * 0.2
+					turret.material = dark_mat
+					root.add_child(turret)
+					# Sensor dome
+					var sensor := CSGSphere3D.new()
+					sensor.radius = base_size.x * 0.12
+					sensor.position = Vector3(0, base_size.y * 0.32, base_size.z * 0.12)
+					sensor.material = glow_mat
+					root.add_child(sensor)
+					# Track assemblies
+					for side in [-1, 1]:
+						var track := CSGBox3D.new()
+						track.size = Vector3(base_size.x * 0.12, base_size.y * 0.18, base_size.z * 0.72)
+						track.position = Vector3(base_size.x * 0.38 * side, -base_size.y * 0.08, 0)
+						track.material = dark_mat
+						root.add_child(track)
+						# Track wheels
+						for wheel_idx in 3:
+							var wheel := CSGCylinder3D.new()
+							wheel.radius = base_size.x * 0.08
+							wheel.height = base_size.x * 0.06
+							wheel.rotation.z = PI / 2
+							wheel.position = Vector3(
+								base_size.x * 0.42 * side,
+								-base_size.y * 0.1,
+								base_size.z * (0.25 - wheel_idx * 0.25)
+							)
+							wheel.material = highlight_mat
+							root.add_child(wheel)
+
+				"soldier", "medium":  # Battle Tank - main combat vehicle
+					# Sloped hull
+					var hull := CSGBox3D.new()
+					hull.size = Vector3(base_size.x * 0.72, base_size.y * 0.32, base_size.z * 0.82)
+					hull.material = base_mat
+					root.add_child(hull)
+					# Upper glacis
+					var glacis := CSGBox3D.new()
+					glacis.size = Vector3(base_size.x * 0.6, base_size.y * 0.12, base_size.z * 0.35)
+					glacis.position = Vector3(0, base_size.y * 0.18, base_size.z * 0.18)
+					glacis.rotation.x = -0.25
+					glacis.material = highlight_mat
+					root.add_child(glacis)
+					# Turret
+					var turret := CSGBox3D.new()
+					turret.size = Vector3(base_size.x * 0.48, base_size.y * 0.22, base_size.z * 0.48)
+					turret.position.y = base_size.y * 0.28
+					turret.material = dark_mat
+					root.add_child(turret)
+					# Main cannon
+					var barrel := CSGCylinder3D.new()
+					barrel.radius = base_size.x * 0.055
+					barrel.height = base_size.z * 0.55
+					barrel.rotation.x = PI / 2
+					barrel.position = Vector3(0, base_size.y * 0.32, base_size.z * 0.5)
+					barrel.material = dark_mat
+					root.add_child(barrel)
+					# Muzzle brake
+					var muzzle := CSGCylinder3D.new()
+					muzzle.radius = base_size.x * 0.07
+					muzzle.height = base_size.z * 0.08
+					muzzle.rotation.x = PI / 2
+					muzzle.position = Vector3(0, base_size.y * 0.32, base_size.z * 0.78)
+					muzzle.material = dark_mat
+					root.add_child(muzzle)
+					# Sensor bar
+					var sensor := CSGBox3D.new()
+					sensor.size = Vector3(base_size.x * 0.28, base_size.y * 0.06, 0.06)
+					sensor.position = Vector3(0, base_size.y * 0.42, base_size.z * 0.18)
+					sensor.material = glow_mat
+					root.add_child(sensor)
+					# Tracks
+					for side in [-1, 1]:
+						var track := CSGBox3D.new()
+						track.size = Vector3(base_size.x * 0.14, base_size.y * 0.22, base_size.z * 0.85)
+						track.position = Vector3(base_size.x * 0.45 * side, -base_size.y * 0.1, 0)
+						track.material = dark_mat
+						root.add_child(track)
+
+				"tank", "heavy":  # Siege Colossus - ultimate war machine
+					# Massive reinforced hull
+					var hull := CSGBox3D.new()
+					hull.size = Vector3(base_size.x * 0.92, base_size.y * 0.42, base_size.z * 0.88)
+					hull.material = base_mat
+					root.add_child(hull)
+					# Angled front armor
+					var front := CSGBox3D.new()
+					front.size = Vector3(base_size.x * 0.85, base_size.y * 0.18, base_size.z * 0.2)
+					front.position = Vector3(0, base_size.y * 0.15, base_size.z * 0.45)
+					front.rotation.x = -0.35
+					front.material = highlight_mat
+					root.add_child(front)
+					# Command turret
+					var turret := CSGBox3D.new()
+					turret.size = Vector3(base_size.x * 0.58, base_size.y * 0.28, base_size.z * 0.52)
+					turret.position.y = base_size.y * 0.35
+					turret.material = dark_mat
+					root.add_child(turret)
+					# Twin siege cannons
+					for side in [-1, 1]:
+						var barrel := CSGCylinder3D.new()
+						barrel.radius = base_size.x * 0.065
+						barrel.height = base_size.z * 0.65
+						barrel.rotation.x = PI / 2
+						barrel.position = Vector3(base_size.x * 0.15 * side, base_size.y * 0.4, base_size.z * 0.55)
+						barrel.material = dark_mat
+						root.add_child(barrel)
+						# Barrel shroud
+						var shroud := CSGCylinder3D.new()
+						shroud.radius = base_size.x * 0.085
+						shroud.height = base_size.z * 0.15
+						shroud.rotation.x = PI / 2
+						shroud.position = Vector3(base_size.x * 0.15 * side, base_size.y * 0.4, base_size.z * 0.75)
+						shroud.material = dark_mat
+						root.add_child(shroud)
+					# Command sensor array
+					var sensor := CSGBox3D.new()
+					sensor.size = Vector3(base_size.x * 0.38, base_size.y * 0.08, 0.08)
+					sensor.position = Vector3(0, base_size.y * 0.52, base_size.z * 0.2)
+					sensor.material = glow_mat
+					root.add_child(sensor)
+					# Side sponsons
+					for side in [-1, 1]:
+						var sponson := CSGBox3D.new()
+						sponson.size = Vector3(base_size.x * 0.18, base_size.y * 0.18, base_size.z * 0.35)
+						sponson.position = Vector3(base_size.x * 0.52 * side, base_size.y * 0.08, base_size.z * 0.15)
+						sponson.material = dark_mat
+						root.add_child(sponson)
+					# Heavy tracks
+					for side in [-1, 1]:
+						var track := CSGBox3D.new()
+						track.size = Vector3(base_size.x * 0.18, base_size.y * 0.28, base_size.z * 0.92)
+						track.position = Vector3(base_size.x * 0.55 * side, -base_size.y * 0.12, 0)
+						track.material = dark_mat
+						root.add_child(track)
+
+				"harvester":  # Mining Hauler - industrial collector
+					var hull := CSGBox3D.new()
+					hull.size = Vector3(base_size.x * 0.68, base_size.y * 0.32, base_size.z * 0.72)
+					hull.material = base_mat
+					root.add_child(hull)
+					var scoop := CSGBox3D.new()
+					scoop.size = Vector3(base_size.x * 0.82, base_size.y * 0.16, base_size.z * 0.32)
+					scoop.position = Vector3(0, -base_size.y * 0.16, base_size.z * 0.38)
+					scoop.material = dark_mat
+					root.add_child(scoop)
+					# Hopper
+					var hopper := CSGBox3D.new()
+					hopper.size = Vector3(base_size.x * 0.55, base_size.y * 0.25, base_size.z * 0.45)
+					hopper.position = Vector3(0, base_size.y * 0.22, -base_size.z * 0.1)
+					hopper.material = dark_mat
+					root.add_child(hopper)
+				_:
+					var body := CSGBox3D.new()
+					body.size = Vector3(base_size.x * 0.8, base_size.y * 0.4, base_size.z * 0.75)
+					body.material = base_mat
+					root.add_child(body)
+
+		5:  # HUMAN REMNANT - Military vehicles and infantry
+			glow_mat.albedo_color = Color(0.95, 0.9, 0.75)
+			glow_mat.emission = Color(0.95, 0.9, 0.75)
+			match unit_type:
+				"scout", "light":  # Combat Soldier - tactical infantry
+					# Tactical vest torso
+					var body := CSGBox3D.new()
+					body.size = Vector3(base_size.x * 0.42, base_size.y * 0.45, base_size.z * 0.32)
+					body.material = base_mat
+					root.add_child(body)
+					# Helmet
+					var head := CSGSphere3D.new()
+					head.radius = base_size.x * 0.14
+					head.position.y = base_size.y * 0.35
+					head.material = base_mat
+					root.add_child(head)
+					# Night vision goggles
+					var nvg := CSGBox3D.new()
+					nvg.size = Vector3(base_size.x * 0.22, base_size.y * 0.08, base_size.z * 0.1)
+					nvg.position = Vector3(0, base_size.y * 0.38, base_size.z * 0.12)
+					nvg.material = dark_mat
+					root.add_child(nvg)
+					# NVG glow
+					for side in [-1, 1]:
+						var lens := CSGCylinder3D.new()
+						lens.radius = base_size.x * 0.04
+						lens.height = base_size.z * 0.04
+						lens.rotation.x = PI / 2
+						lens.position = Vector3(base_size.x * 0.06 * side, base_size.y * 0.38, base_size.z * 0.18)
+						lens.material = glow_mat
+						root.add_child(lens)
+					# Rifle
+					var rifle := CSGBox3D.new()
+					rifle.size = Vector3(base_size.x * 0.06, base_size.y * 0.08, base_size.z * 0.4)
+					rifle.position = Vector3(base_size.x * 0.22, base_size.y * 0.12, base_size.z * 0.15)
+					rifle.material = dark_mat
+					root.add_child(rifle)
+					# Legs
+					for side in [-1, 1]:
+						var leg := CSGBox3D.new()
+						leg.size = Vector3(base_size.x * 0.1, base_size.y * 0.32, base_size.z * 0.12)
+						leg.position = Vector3(base_size.x * 0.1 * side, -base_size.y * 0.18, 0)
+						leg.material = dark_mat
+						root.add_child(leg)
+
+				"soldier", "medium":  # LAV-25 APC - light armored vehicle
+					# APC hull
+					var hull := CSGBox3D.new()
+					hull.size = Vector3(base_size.x * 0.58, base_size.y * 0.42, base_size.z * 0.72)
+					hull.material = base_mat
+					root.add_child(hull)
+					# Sloped front
+					var front := CSGBox3D.new()
+					front.size = Vector3(base_size.x * 0.52, base_size.y * 0.2, base_size.z * 0.18)
+					front.position = Vector3(0, base_size.y * 0.08, base_size.z * 0.4)
+					front.rotation.x = -0.4
+					front.material = highlight_mat
+					root.add_child(front)
+					# Turret ring
+					var turret := CSGCylinder3D.new()
+					turret.radius = base_size.x * 0.16
+					turret.height = base_size.y * 0.18
+					turret.position.y = base_size.y * 0.3
+					turret.material = dark_mat
+					root.add_child(turret)
+					# Autocannon
+					var cannon := CSGCylinder3D.new()
+					cannon.radius = base_size.x * 0.04
+					cannon.height = base_size.z * 0.4
+					cannon.rotation.x = PI / 2
+					cannon.position = Vector3(0, base_size.y * 0.35, base_size.z * 0.35)
+					cannon.material = dark_mat
+					root.add_child(cannon)
+					# Headlights
+					for side in [-1, 1]:
+						var light := CSGSphere3D.new()
+						light.radius = base_size.x * 0.06
+						light.position = Vector3(base_size.x * 0.2 * side, base_size.y * 0.12, base_size.z * 0.38)
+						light.material = glow_mat
+						root.add_child(light)
+					# Wheels
+					for side in [-1, 1]:
+						for wheel_idx in 4:
+							var wheel := CSGCylinder3D.new()
+							wheel.radius = base_size.x * 0.12
+							wheel.height = base_size.x * 0.08
+							wheel.rotation.z = PI / 2
+							wheel.position = Vector3(
+								base_size.x * 0.35 * side,
+								-base_size.y * 0.18,
+								base_size.z * (0.28 - wheel_idx * 0.18)
+							)
+							wheel.material = dark_mat
+							root.add_child(wheel)
+
+				"tank", "heavy":  # M1 Abrams MBT - main battle tank
+					# Hull
+					var hull := CSGBox3D.new()
+					hull.size = Vector3(base_size.x * 0.68, base_size.y * 0.38, base_size.z * 0.82)
+					hull.material = base_mat
+					root.add_child(hull)
+					# Composite armor front
+					var armor := CSGBox3D.new()
+					armor.size = Vector3(base_size.x * 0.62, base_size.y * 0.22, base_size.z * 0.15)
+					armor.position = Vector3(0, base_size.y * 0.12, base_size.z * 0.42)
+					armor.rotation.x = -0.5
+					armor.material = highlight_mat
+					root.add_child(armor)
+					# Turret
+					var turret := CSGCylinder3D.new()
+					turret.radius = base_size.x * 0.28
+					turret.height = base_size.y * 0.24
+					turret.position.y = base_size.y * 0.32
+					turret.material = dark_mat
+					root.add_child(turret)
+					# Turret bustle
+					var bustle := CSGBox3D.new()
+					bustle.size = Vector3(base_size.x * 0.5, base_size.y * 0.2, base_size.z * 0.25)
+					bustle.position = Vector3(0, base_size.y * 0.32, -base_size.z * 0.22)
+					bustle.material = dark_mat
+					root.add_child(bustle)
+					# Main gun
+					var barrel := CSGCylinder3D.new()
+					barrel.radius = base_size.x * 0.048
+					barrel.height = base_size.z * 0.6
+					barrel.rotation.x = PI / 2
+					barrel.position = Vector3(0, base_size.y * 0.35, base_size.z * 0.52)
+					barrel.material = dark_mat
+					root.add_child(barrel)
+					# Commander's cupola
+					var cupola := CSGCylinder3D.new()
+					cupola.radius = base_size.x * 0.1
+					cupola.height = base_size.y * 0.12
+					cupola.position = Vector3(-base_size.x * 0.12, base_size.y * 0.48, -base_size.z * 0.08)
+					cupola.material = dark_mat
+					root.add_child(cupola)
+					# Sensor/optics
+					var optics := CSGSphere3D.new()
+					optics.radius = base_size.x * 0.06
+					optics.position = Vector3(0, base_size.y * 0.48, base_size.z * 0.15)
+					optics.material = glow_mat
+					root.add_child(optics)
+					# Tracks
+					for side in [-1, 1]:
+						var track := CSGBox3D.new()
+						track.size = Vector3(base_size.x * 0.15, base_size.y * 0.24, base_size.z * 0.85)
+						track.position = Vector3(base_size.x * 0.42 * side, -base_size.y * 0.12, 0)
+						track.material = dark_mat
+						root.add_child(track)
+
+				"harvester":  # Supply Truck - logistics vehicle
+					var hull := CSGBox3D.new()
+					hull.size = Vector3(base_size.x * 0.52, base_size.y * 0.38, base_size.z * 0.62)
+					hull.material = base_mat
+					root.add_child(hull)
+					var scoop := CSGBox3D.new()
+					scoop.size = Vector3(base_size.x * 0.48, base_size.y * 0.12, base_size.z * 0.25)
+					scoop.position = Vector3(0, -base_size.y * 0.16, base_size.z * 0.32)
+					scoop.material = dark_mat
+					root.add_child(scoop)
+					# Cab
+					var cab := CSGBox3D.new()
+					cab.size = Vector3(base_size.x * 0.45, base_size.y * 0.25, base_size.z * 0.22)
+					cab.position = Vector3(0, base_size.y * 0.25, base_size.z * 0.18)
+					cab.material = dark_mat
+					root.add_child(cab)
+					# Windshield
+					var windshield := CSGBox3D.new()
+					windshield.size = Vector3(base_size.x * 0.35, base_size.y * 0.12, 0.04)
+					windshield.position = Vector3(0, base_size.y * 0.28, base_size.z * 0.3)
+					windshield.material = glow_mat
+					root.add_child(windshield)
+				_:
+					var body := CSGBox3D.new()
+					body.size = Vector3(base_size.x * 0.55, base_size.y * 0.5, base_size.z * 0.6)
+					body.material = base_mat
+					root.add_child(body)
+
+		_:  # Default fallback
 			var body := CSGBox3D.new()
 			body.size = base_size
 			body.material = base_mat
 			root.add_child(body)
 
 	return root
-
-
-## Add Aether Swarm visual parts - sleek stealth drones with phase tech.
-## Faction theme: Translucent, angular, ethereal, glowing cores
-func _add_aether_swarm_parts(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, unit_type: String) -> void:
-	# Glowing core material (shared)
-	var core_mat := StandardMaterial3D.new()
-	core_mat.albedo_color = Color(0.6, 0.95, 1.0)
-	core_mat.emission_enabled = true
-	core_mat.emission = Color(0.4, 0.9, 1.0)
-	core_mat.emission_energy_multiplier = 2.5
-	core_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	core_mat.albedo_color.a = 0.8
-
-	# Dark panel material
-	var panel_mat := mat.duplicate()
-	panel_mat.albedo_color = mat.albedo_color * 0.5
-	panel_mat.metallic = 0.8
-
-	match unit_type:
-		"scout", "light":
-			# WASP DRONE - tiny, fast, insectoid
-			# Elongated body
-			var body := CSGCylinder3D.new()
-			body.radius = base_size.x * 0.2
-			body.height = base_size.z * 0.8
-			body.rotation.x = PI / 2
-			body.material = mat
-			root.add_child(body)
-
-			# Translucent wings (4 wings)
-			var wing_mat := StandardMaterial3D.new()
-			wing_mat.albedo_color = Color(0.7, 0.95, 1.0, 0.4)
-			wing_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-			wing_mat.emission_enabled = true
-			wing_mat.emission = Color(0.3, 0.8, 1.0)
-
-			for i in range(4):
-				var wing := CSGBox3D.new()
-				var side: float = -1.0 if i % 2 == 0 else 1.0
-				var front: float = 0.15 if i < 2 else -0.1
-				wing.size = Vector3(base_size.x * 0.6, base_size.y * 0.02, base_size.z * 0.25)
-				wing.position = Vector3(base_size.x * 0.35 * side, base_size.y * 0.15, base_size.z * front)
-				wing.rotation.z = side * 0.2
-				wing.rotation.y = side * 0.1
-				wing.material = wing_mat
-				root.add_child(wing)
-
-			# Glowing eye cluster
-			var eyes := CSGSphere3D.new()
-			eyes.radius = base_size.x * 0.15
-			eyes.position = Vector3(0, base_size.y * 0.1, base_size.z * 0.35)
-			eyes.material = core_mat
-			root.add_child(eyes)
-
-			# Stinger tail
-			var stinger := CSGCylinder3D.new()
-			stinger.radius = base_size.x * 0.05
-			stinger.height = base_size.z * 0.3
-			stinger.cone = true
-			stinger.rotation.x = PI / 2
-			stinger.position.z = -base_size.z * 0.5
-			stinger.material = panel_mat
-			root.add_child(stinger)
-
-		"soldier", "medium":
-			# PHASE DRONE - angular stealth fighter
-			# Diamond-shaped main body
-			var body := CSGBox3D.new()
-			body.size = Vector3(base_size.x * 0.8, base_size.y * 0.4, base_size.z * 0.9)
-			body.rotation.y = PI / 4
-			body.material = mat
-			root.add_child(body)
-
-			# Phase panels (angled armor)
-			for side in [-1, 1]:
-				var panel := CSGBox3D.new()
-				panel.size = Vector3(base_size.x * 0.1, base_size.y * 0.5, base_size.z * 0.6)
-				panel.position = Vector3(base_size.x * 0.45 * side, base_size.y * 0.1, 0)
-				panel.rotation.z = side * 0.5
-				panel.material = panel_mat
-				root.add_child(panel)
-
-			# Central phase core
-			var core := CSGSphere3D.new()
-			core.radius = base_size.x * 0.2
-			core.position.y = base_size.y * 0.25
-			core.material = core_mat
-			root.add_child(core)
-
-			# Forward sensor array
-			var sensor := CSGBox3D.new()
-			sensor.size = Vector3(base_size.x * 0.4, base_size.y * 0.1, base_size.z * 0.1)
-			sensor.position = Vector3(0, base_size.y * 0.2, base_size.z * 0.4)
-			sensor.material = core_mat
-			root.add_child(sensor)
-
-			# Thruster pods
-			for side in [-1, 1]:
-				var thruster := CSGCylinder3D.new()
-				thruster.radius = base_size.x * 0.1
-				thruster.height = base_size.z * 0.25
-				thruster.rotation.x = PI / 2
-				thruster.position = Vector3(base_size.x * 0.3 * side, 0, -base_size.z * 0.45)
-				thruster.material = panel_mat
-				root.add_child(thruster)
-
-		"tank", "heavy":
-			# VOID CARRIER - heavy drone platform
-			# Hexagonal hull
-			var hull := CSGCylinder3D.new()
-			hull.radius = base_size.x * 0.5
-			hull.height = base_size.y * 0.4
-			hull.sides = 6
-			hull.material = mat
-			root.add_child(hull)
-
-			# Upper dome with phase generator
-			var dome := CSGSphere3D.new()
-			dome.radius = base_size.x * 0.35
-			dome.position.y = base_size.y * 0.25
-			dome.material = mat
-			root.add_child(dome)
-
-			# Massive phase core
-			var core := CSGSphere3D.new()
-			core.radius = base_size.x * 0.25
-			core.position.y = base_size.y * 0.4
-			core.material = core_mat
-			root.add_child(core)
-
-			# Weapon pods (4 corners)
-			for i in range(4):
-				var angle := i * TAU / 4 + PI / 4
-				var pod := CSGBox3D.new()
-				pod.size = Vector3(base_size.x * 0.2, base_size.y * 0.35, base_size.z * 0.2)
-				pod.position = Vector3(cos(angle) * base_size.x * 0.55, base_size.y * 0.1, sin(angle) * base_size.z * 0.55)
-				pod.material = panel_mat
-				root.add_child(pod)
-
-				# Pod glow
-				var glow := CSGSphere3D.new()
-				glow.radius = base_size.x * 0.08
-				glow.position = pod.position + Vector3(0, base_size.y * 0.2, 0)
-				glow.material = core_mat
-				root.add_child(glow)
-
-			# Gravity fins underneath
-			for side in [-1, 1]:
-				var fin := CSGBox3D.new()
-				fin.size = Vector3(base_size.x * 0.15, base_size.y * 0.1, base_size.z * 0.7)
-				fin.position = Vector3(base_size.x * 0.4 * side, -base_size.y * 0.2, 0)
-				fin.material = panel_mat
-				root.add_child(fin)
-
-		_:
-			# Default fallback - bright magenta cube (indicates unhandled unit type)
-			var error_mat := StandardMaterial3D.new()
-			error_mat.albedo_color = Color(1.0, 0.0, 1.0)  # Bright magenta
-			error_mat.emission_enabled = true
-			error_mat.emission = Color(1.0, 0.0, 1.0)
-			error_mat.emission_energy_multiplier = 2.0
-			var cube := CSGBox3D.new()
-			cube.size = base_size
-			cube.material = error_mat
-			root.add_child(cube)
-
-
-## Add OptiForge Legion visual parts - humanoid industrial bots.
-## Faction theme: Humanoid, industrial, glowing red visors, mass-produced look
-func _add_optiforge_parts(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, unit_type: String) -> void:
-	# Shared visor material (glowing red)
-	var visor_mat := StandardMaterial3D.new()
-	visor_mat.albedo_color = Color(1.0, 0.2, 0.1)
-	visor_mat.emission_enabled = true
-	visor_mat.emission = Color(1.0, 0.3, 0.1)
-	visor_mat.emission_energy_multiplier = 2.5
-
-	# Dark armor material
-	var armor_mat := mat.duplicate()
-	armor_mat.albedo_color = mat.albedo_color * 0.6
-	armor_mat.metallic = 0.7
-
-	# Joint material (darker)
-	var joint_mat := StandardMaterial3D.new()
-	joint_mat.albedo_color = Color(0.2, 0.2, 0.25)
-	joint_mat.metallic = 0.5
-
-	match unit_type:
-		"scout", "light":
-			# RUNNER - lean, fast humanoid
-			# Slim torso
-			var torso := CSGBox3D.new()
-			torso.size = Vector3(base_size.x * 0.5, base_size.y * 0.45, base_size.z * 0.35)
-			torso.position.y = base_size.y * 0.15
-			torso.material = mat
-			root.add_child(torso)
-
-			# Small head with visor
-			var head := CSGBox3D.new()
-			head.size = Vector3(base_size.x * 0.3, base_size.y * 0.2, base_size.z * 0.25)
-			head.position.y = base_size.y * 0.48
-			head.material = mat
-			root.add_child(head)
-
-			var visor := CSGBox3D.new()
-			visor.size = Vector3(base_size.x * 0.28, base_size.y * 0.06, base_size.z * 0.08)
-			visor.position = Vector3(0, base_size.y * 0.5, base_size.z * 0.12)
-			visor.material = visor_mat
-			root.add_child(visor)
-
-			# Thin arms
-			for side in [-1, 1]:
-				var arm := CSGBox3D.new()
-				arm.size = Vector3(base_size.x * 0.12, base_size.y * 0.4, base_size.z * 0.12)
-				arm.position = Vector3(base_size.x * 0.35 * side, base_size.y * 0.1, 0)
-				arm.rotation.z = side * 0.15
-				arm.material = armor_mat
-				root.add_child(arm)
-
-			# Running legs (bent)
-			for side in [-1, 1]:
-				# Upper leg
-				var upper_leg := CSGBox3D.new()
-				upper_leg.size = Vector3(base_size.x * 0.15, base_size.y * 0.25, base_size.z * 0.15)
-				upper_leg.position = Vector3(base_size.x * 0.15 * side, -base_size.y * 0.15, base_size.z * 0.05)
-				upper_leg.rotation.x = -0.3
-				upper_leg.material = joint_mat
-				root.add_child(upper_leg)
-
-				# Lower leg
-				var lower_leg := CSGBox3D.new()
-				lower_leg.size = Vector3(base_size.x * 0.1, base_size.y * 0.25, base_size.z * 0.1)
-				lower_leg.position = Vector3(base_size.x * 0.15 * side, -base_size.y * 0.4, base_size.z * -0.05)
-				lower_leg.material = armor_mat
-				root.add_child(lower_leg)
-
-		"soldier", "medium":
-			# TROOPER - standard infantry with weapon arm
-			# Blocky torso with chest plate
-			var torso := CSGBox3D.new()
-			torso.size = Vector3(base_size.x * 0.6, base_size.y * 0.5, base_size.z * 0.45)
-			torso.position.y = base_size.y * 0.1
-			torso.material = mat
-			root.add_child(torso)
-
-			# Chest detail
-			var chest := CSGBox3D.new()
-			chest.size = Vector3(base_size.x * 0.4, base_size.y * 0.25, base_size.z * 0.1)
-			chest.position = Vector3(0, base_size.y * 0.15, base_size.z * 0.25)
-			chest.material = armor_mat
-			root.add_child(chest)
-
-			# Head with angular visor
-			var head := CSGBox3D.new()
-			head.size = Vector3(base_size.x * 0.35, base_size.y * 0.22, base_size.z * 0.3)
-			head.position.y = base_size.y * 0.45
-			head.material = mat
-			root.add_child(head)
-
-			var visor := CSGBox3D.new()
-			visor.size = Vector3(base_size.x * 0.32, base_size.y * 0.08, base_size.z * 0.08)
-			visor.position = Vector3(0, base_size.y * 0.47, base_size.z * 0.14)
-			visor.material = visor_mat
-			root.add_child(visor)
-
-			# Shoulder pads
-			for side in [-1, 1]:
-				var shoulder := CSGBox3D.new()
-				shoulder.size = Vector3(base_size.x * 0.22, base_size.y * 0.15, base_size.z * 0.35)
-				shoulder.position = Vector3(base_size.x * 0.4 * side, base_size.y * 0.28, 0)
-				shoulder.material = armor_mat
-				root.add_child(shoulder)
-
-			# Gun arm (right side)
-			var gun_arm := CSGBox3D.new()
-			gun_arm.size = Vector3(base_size.x * 0.15, base_size.y * 0.35, base_size.z * 0.15)
-			gun_arm.position = Vector3(base_size.x * 0.4, base_size.y * 0.05, base_size.z * 0.1)
-			gun_arm.material = joint_mat
-			root.add_child(gun_arm)
-
-			# Gun barrel
-			var barrel := CSGCylinder3D.new()
-			barrel.radius = base_size.x * 0.06
-			barrel.height = base_size.z * 0.4
-			barrel.rotation.x = PI / 2
-			barrel.position = Vector3(base_size.x * 0.4, base_size.y * 0.0, base_size.z * 0.4)
-			barrel.material = armor_mat
-			root.add_child(barrel)
-
-			# Left arm
-			var left_arm := CSGBox3D.new()
-			left_arm.size = Vector3(base_size.x * 0.14, base_size.y * 0.35, base_size.z * 0.14)
-			left_arm.position = Vector3(-base_size.x * 0.4, base_size.y * 0.0, 0)
-			left_arm.material = joint_mat
-			root.add_child(left_arm)
-
-			# Legs
-			for side in [-1, 1]:
-				var leg := CSGBox3D.new()
-				leg.size = Vector3(base_size.x * 0.18, base_size.y * 0.4, base_size.z * 0.18)
-				leg.position = Vector3(base_size.x * 0.18 * side, -base_size.y * 0.35, 0)
-				leg.material = joint_mat
-				root.add_child(leg)
-
-		"tank", "heavy":
-			# BRUTE - hulking heavy infantry
-			# Massive torso
-			var torso := CSGBox3D.new()
-			torso.size = Vector3(base_size.x * 0.85, base_size.y * 0.55, base_size.z * 0.6)
-			torso.position.y = base_size.y * 0.1
-			torso.material = mat
-			root.add_child(torso)
-
-			# Heavy armor plates
-			for side in [-1, 1]:
-				var plate := CSGBox3D.new()
-				plate.size = Vector3(base_size.x * 0.15, base_size.y * 0.5, base_size.z * 0.55)
-				plate.position = Vector3(base_size.x * 0.5 * side, base_size.y * 0.1, 0)
-				plate.material = armor_mat
-				root.add_child(plate)
-
-			# Small head (armored)
-			var head := CSGBox3D.new()
-			head.size = Vector3(base_size.x * 0.35, base_size.y * 0.2, base_size.z * 0.35)
-			head.position.y = base_size.y * 0.45
-			head.material = armor_mat
-			root.add_child(head)
-
-			# Dual visor
-			var visor := CSGBox3D.new()
-			visor.size = Vector3(base_size.x * 0.32, base_size.y * 0.1, base_size.z * 0.1)
-			visor.position = Vector3(0, base_size.y * 0.45, base_size.z * 0.18)
-			visor.material = visor_mat
-			root.add_child(visor)
-
-			# Massive shoulder cannons
-			for side in [-1, 1]:
-				var cannon_base := CSGBox3D.new()
-				cannon_base.size = Vector3(base_size.x * 0.25, base_size.y * 0.25, base_size.z * 0.25)
-				cannon_base.position = Vector3(base_size.x * 0.55 * side, base_size.y * 0.35, 0)
-				cannon_base.material = armor_mat
-				root.add_child(cannon_base)
-
-				var cannon := CSGCylinder3D.new()
-				cannon.radius = base_size.x * 0.08
-				cannon.height = base_size.z * 0.5
-				cannon.rotation.x = PI / 2
-				cannon.position = Vector3(base_size.x * 0.55 * side, base_size.y * 0.35, base_size.z * 0.35)
-				cannon.material = joint_mat
-				root.add_child(cannon)
-
-			# Thick arms
-			for side in [-1, 1]:
-				var arm := CSGBox3D.new()
-				arm.size = Vector3(base_size.x * 0.2, base_size.y * 0.45, base_size.z * 0.2)
-				arm.position = Vector3(base_size.x * 0.55 * side, -base_size.y * 0.05, base_size.z * 0.1)
-				arm.material = joint_mat
-				root.add_child(arm)
-
-				# Fist
-				var fist := CSGBox3D.new()
-				fist.size = Vector3(base_size.x * 0.18, base_size.y * 0.15, base_size.z * 0.18)
-				fist.position = Vector3(base_size.x * 0.55 * side, -base_size.y * 0.3, base_size.z * 0.1)
-				fist.material = mat
-				root.add_child(fist)
-
-			# Heavy legs
-			for side in [-1, 1]:
-				var leg := CSGBox3D.new()
-				leg.size = Vector3(base_size.x * 0.25, base_size.y * 0.4, base_size.z * 0.25)
-				leg.position = Vector3(base_size.x * 0.25 * side, -base_size.y * 0.35, 0)
-				leg.material = joint_mat
-				root.add_child(leg)
-
-
-## Add Dynapods Vanguard visual parts - agile, multi-limbed acrobatic bots.
-## Faction theme: Spider/crab-like, organic curves, green glowing eyes, blade arms
-func _add_dynapods_parts(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, unit_type: String) -> void:
-	# Glowing eye material
-	var eye_mat := StandardMaterial3D.new()
-	eye_mat.albedo_color = Color(0.3, 1.0, 0.4)
-	eye_mat.emission_enabled = true
-	eye_mat.emission = Color(0.2, 1.0, 0.4)
-	eye_mat.emission_energy_multiplier = 2.5
-
-	# Leg segment material
-	var leg_mat := mat.duplicate()
-	leg_mat.albedo_color = mat.albedo_color * 0.75
-	leg_mat.metallic = 0.6
-
-	# Blade material
-	var blade_mat := StandardMaterial3D.new()
-	blade_mat.albedo_color = Color(0.7, 0.75, 0.7)
-	blade_mat.metallic = 0.95
-	blade_mat.roughness = 0.2
-
-	match unit_type:
-		"scout", "light":
-			# STALKER - small spider drone
-			# Compact oval body
-			var body := CSGCylinder3D.new()
-			body.radius = base_size.x * 0.25
-			body.height = base_size.y * 0.35
-			body.material = mat
-			root.add_child(body)
-
-			# Head section
-			var head := CSGSphere3D.new()
-			head.radius = base_size.x * 0.18
-			head.position = Vector3(0, base_size.y * 0.1, base_size.z * 0.15)
-			head.material = mat
-			root.add_child(head)
-
-			# Four spider eyes
-			for i in range(4):
-				var eye := CSGSphere3D.new()
-				eye.radius = base_size.x * 0.05
-				var ex: float = (i % 2 - 0.5) * base_size.x * 0.15
-				var ez: float = base_size.z * (0.25 if i < 2 else 0.18)
-				var ey: float = base_size.y * (0.18 if i < 2 else 0.12)
-				eye.position = Vector3(ex, ey, ez)
-				eye.material = eye_mat
-				root.add_child(eye)
-
-			# 6 thin spider legs
-			for i in range(6):
-				var angle: float = (i - 2.5) * 0.5  # Spread around sides
-				var side: float = 1.0 if i < 3 else -1.0
-
-				# Upper leg segment
-				var upper := CSGBox3D.new()
-				upper.size = Vector3(base_size.x * 0.06, base_size.y * 0.3, base_size.z * 0.06)
-				upper.position = Vector3(base_size.x * 0.35 * side, base_size.y * 0.05, base_size.z * angle * 0.3)
-				upper.rotation.z = side * 0.8
-				upper.rotation.y = angle * 0.2
-				upper.material = leg_mat
-				root.add_child(upper)
-
-				# Lower leg segment
-				var lower := CSGBox3D.new()
-				lower.size = Vector3(base_size.x * 0.04, base_size.y * 0.25, base_size.z * 0.04)
-				lower.position = Vector3(base_size.x * 0.5 * side, -base_size.y * 0.2, base_size.z * angle * 0.35)
-				lower.rotation.z = side * 0.3
-				lower.material = leg_mat
-				root.add_child(lower)
-
-		"soldier", "medium":
-			# STRIKER - quad-legged warrior with blade arms
-			# Central body cylinder
-			var body := CSGCylinder3D.new()
-			body.radius = base_size.x * 0.3
-			body.height = base_size.y * 0.5
-			body.material = mat
-			root.add_child(body)
-
-			# Upper thorax
-			var thorax := CSGSphere3D.new()
-			thorax.radius = base_size.x * 0.28
-			thorax.position.y = base_size.y * 0.25
-			thorax.material = mat
-			root.add_child(thorax)
-
-			# Head with mandibles
-			var head := CSGBox3D.new()
-			head.size = Vector3(base_size.x * 0.3, base_size.y * 0.2, base_size.z * 0.25)
-			head.position = Vector3(0, base_size.y * 0.35, base_size.z * 0.2)
-			head.material = mat
-			root.add_child(head)
-
-			# Dual eyes
-			for side in [-1, 1]:
-				var eye := CSGSphere3D.new()
-				eye.radius = base_size.x * 0.08
-				eye.position = Vector3(base_size.x * 0.12 * side, base_size.y * 0.4, base_size.z * 0.35)
-				eye.material = eye_mat
-				root.add_child(eye)
-
-			# Blade arms (2)
-			for side in [-1, 1]:
-				# Arm joint
-				var arm := CSGBox3D.new()
-				arm.size = Vector3(base_size.x * 0.12, base_size.y * 0.35, base_size.z * 0.12)
-				arm.position = Vector3(base_size.x * 0.4 * side, base_size.y * 0.2, base_size.z * 0.1)
-				arm.rotation.z = side * 0.4
-				arm.material = leg_mat
-				root.add_child(arm)
-
-				# Blade
-				var blade := CSGBox3D.new()
-				blade.size = Vector3(base_size.x * 0.05, base_size.y * 0.08, base_size.z * 0.45)
-				blade.position = Vector3(base_size.x * 0.55 * side, base_size.y * 0.15, base_size.z * 0.35)
-				blade.material = blade_mat
-				root.add_child(blade)
-
-			# 4 powerful legs
-			for i in range(4):
-				var angle: float = i * TAU / 4 + PI / 4
-				var leg_x: float = cos(angle) * base_size.x * 0.35
-				var leg_z: float = sin(angle) * base_size.z * 0.35
-
-				# Upper leg
-				var upper := CSGBox3D.new()
-				upper.size = Vector3(base_size.x * 0.12, base_size.y * 0.35, base_size.z * 0.12)
-				upper.position = Vector3(leg_x, -base_size.y * 0.05, leg_z)
-				upper.rotation.x = sin(angle) * 0.4
-				upper.rotation.z = cos(angle) * 0.4
-				upper.material = leg_mat
-				root.add_child(upper)
-
-				# Lower leg
-				var lower := CSGBox3D.new()
-				lower.size = Vector3(base_size.x * 0.08, base_size.y * 0.3, base_size.z * 0.08)
-				lower.position = Vector3(leg_x * 1.4, -base_size.y * 0.35, leg_z * 1.4)
-				lower.material = mat
-				root.add_child(lower)
-
-		"tank", "heavy":
-			# BEHEMOTH - massive centaur-like creature
-			# Large abdomen
-			var abdomen := CSGCylinder3D.new()
-			abdomen.radius = base_size.x * 0.45
-			abdomen.height = base_size.y * 0.4
-			abdomen.position = Vector3(0, 0, -base_size.z * 0.15)
-			abdomen.material = mat
-			root.add_child(abdomen)
-
-			# Thorax
-			var thorax := CSGCylinder3D.new()
-			thorax.radius = base_size.x * 0.35
-			thorax.height = base_size.y * 0.45
-			thorax.position = Vector3(0, base_size.y * 0.15, base_size.z * 0.2)
-			thorax.material = mat
-			root.add_child(thorax)
-
-			# Armored head
-			var head := CSGBox3D.new()
-			head.size = Vector3(base_size.x * 0.4, base_size.y * 0.3, base_size.z * 0.35)
-			head.position = Vector3(0, base_size.y * 0.4, base_size.z * 0.35)
-			head.material = mat
-			root.add_child(head)
-
-			# Large compound eyes
-			for side in [-1, 1]:
-				var eye := CSGSphere3D.new()
-				eye.radius = base_size.x * 0.12
-				eye.position = Vector3(base_size.x * 0.18 * side, base_size.y * 0.45, base_size.z * 0.5)
-				eye.material = eye_mat
-				root.add_child(eye)
-
-			# Heavy blade arms
-			for side in [-1, 1]:
-				var arm_base := CSGBox3D.new()
-				arm_base.size = Vector3(base_size.x * 0.18, base_size.y * 0.4, base_size.z * 0.18)
-				arm_base.position = Vector3(base_size.x * 0.45 * side, base_size.y * 0.25, base_size.z * 0.25)
-				arm_base.rotation.z = side * 0.3
-				arm_base.material = leg_mat
-				root.add_child(arm_base)
-
-				# Massive blade
-				var blade := CSGBox3D.new()
-				blade.size = Vector3(base_size.x * 0.08, base_size.y * 0.1, base_size.z * 0.6)
-				blade.position = Vector3(base_size.x * 0.6 * side, base_size.y * 0.15, base_size.z * 0.5)
-				blade.material = blade_mat
-				root.add_child(blade)
-
-			# 6 heavy legs
-			for i in range(6):
-				var leg_side: float = 1.0 if i % 2 == 0 else -1.0
-				var leg_row: int = i / 2  # 0, 1, 2
-				var leg_z: float = (leg_row - 1) * base_size.z * 0.35
-
-				var upper := CSGBox3D.new()
-				upper.size = Vector3(base_size.x * 0.14, base_size.y * 0.4, base_size.z * 0.14)
-				upper.position = Vector3(base_size.x * 0.5 * leg_side, -base_size.y * 0.05, leg_z)
-				upper.rotation.z = leg_side * 0.6
-				upper.material = leg_mat
-				root.add_child(upper)
-
-				var lower := CSGBox3D.new()
-				lower.size = Vector3(base_size.x * 0.1, base_size.y * 0.35, base_size.z * 0.1)
-				lower.position = Vector3(base_size.x * 0.7 * leg_side, -base_size.y * 0.35, leg_z)
-				lower.material = mat
-				root.add_child(lower)
-
-
-## Add LogiBots Colossus visual parts - heavy, tank-like siege units.
-## Faction theme: Industrial tanks, tracked vehicles, yellow sensor arrays, massive guns
-func _add_logibots_parts(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, unit_type: String) -> void:
-	# Sensor/light material (glowing yellow)
-	var sensor_mat := StandardMaterial3D.new()
-	sensor_mat.albedo_color = Color(0.95, 0.9, 0.3)
-	sensor_mat.emission_enabled = true
-	sensor_mat.emission = Color(1.0, 0.95, 0.4)
-	sensor_mat.emission_energy_multiplier = 2.0
-
-	# Track material (dark rubber)
-	var track_mat := StandardMaterial3D.new()
-	track_mat.albedo_color = Color(0.15, 0.15, 0.18)
-	track_mat.roughness = 0.95
-
-	# Barrel/gun material
-	var barrel_mat := mat.duplicate()
-	barrel_mat.albedo_color = mat.albedo_color * 0.5
-	barrel_mat.metallic = 0.9
-	barrel_mat.roughness = 0.3
-
-	# Armor plate material
-	var armor_mat := mat.duplicate()
-	armor_mat.albedo_color = mat.albedo_color * 0.7
-
-	match unit_type:
-		"scout", "light":
-			# SCOUT ROVER - small tracked recon vehicle
-			# Low profile hull
-			var hull := CSGBox3D.new()
-			hull.size = Vector3(base_size.x * 0.7, base_size.y * 0.3, base_size.z * 0.6)
-			hull.position.y = -base_size.y * 0.1
-			hull.material = mat
-			root.add_child(hull)
-
-			# Sensor dome
-			var dome := CSGSphere3D.new()
-			dome.radius = base_size.x * 0.2
-			dome.position.y = base_size.y * 0.15
-			dome.material = mat
-			root.add_child(dome)
-
-			# Rotating sensor dish
-			var dish := CSGCylinder3D.new()
-			dish.radius = base_size.x * 0.15
-			dish.height = base_size.y * 0.05
-			dish.position.y = base_size.y * 0.35
-			dish.material = sensor_mat
-			root.add_child(dish)
-
-			# Small antenna
-			var antenna := CSGCylinder3D.new()
-			antenna.radius = base_size.x * 0.02
-			antenna.height = base_size.y * 0.25
-			antenna.position = Vector3(base_size.x * 0.2, base_size.y * 0.35, -base_size.z * 0.15)
-			antenna.material = barrel_mat
-			root.add_child(antenna)
-
-			# Light machine gun
-			var gun := CSGCylinder3D.new()
-			gun.radius = base_size.x * 0.04
-			gun.height = base_size.z * 0.35
-			gun.rotation.x = PI / 2
-			gun.position = Vector3(0, base_size.y * 0.15, base_size.z * 0.35)
-			gun.material = barrel_mat
-			root.add_child(gun)
-
-			# Small tracks
-			for side in [-1, 1]:
-				var track := CSGBox3D.new()
-				track.size = Vector3(base_size.x * 0.15, base_size.y * 0.2, base_size.z * 0.65)
-				track.position = Vector3(base_size.x * 0.4 * side, -base_size.y * 0.25, 0)
-				track.material = track_mat
-				root.add_child(track)
-
-				# Track wheels
-				for w in range(3):
-					var wheel := CSGCylinder3D.new()
-					wheel.radius = base_size.y * 0.08
-					wheel.height = base_size.x * 0.05
-					wheel.rotation.z = PI / 2
-					wheel.position = Vector3(base_size.x * 0.4 * side, -base_size.y * 0.25, base_size.z * (w - 1) * 0.25)
-					wheel.material = armor_mat
-					root.add_child(wheel)
-
-		"soldier", "medium":
-			# BATTLE TANK - standard main battle tank
-			# Angled hull
-			var hull := CSGBox3D.new()
-			hull.size = Vector3(base_size.x * 0.9, base_size.y * 0.35, base_size.z * 0.75)
-			hull.position.y = -base_size.y * 0.1
-			hull.material = mat
-			root.add_child(hull)
-
-			# Front glacis plate (angled)
-			var glacis := CSGBox3D.new()
-			glacis.size = Vector3(base_size.x * 0.7, base_size.y * 0.15, base_size.z * 0.2)
-			glacis.position = Vector3(0, base_size.y * 0.05, base_size.z * 0.4)
-			glacis.rotation.x = -0.4
-			glacis.material = armor_mat
-			root.add_child(glacis)
-
-			# Turret (octagonal look)
-			var turret := CSGCylinder3D.new()
-			turret.radius = base_size.x * 0.32
-			turret.height = base_size.y * 0.3
-			turret.sides = 8
-			turret.position.y = base_size.y * 0.15
-			turret.material = mat
-			root.add_child(turret)
-
-			# Main gun
-			var barrel := CSGCylinder3D.new()
-			barrel.radius = base_size.x * 0.06
-			barrel.height = base_size.z * 0.65
-			barrel.rotation.x = PI / 2
-			barrel.position = Vector3(0, base_size.y * 0.2, base_size.z * 0.5)
-			barrel.material = barrel_mat
-			root.add_child(barrel)
-
-			# Coaxial machine gun
-			var coax := CSGCylinder3D.new()
-			coax.radius = base_size.x * 0.025
-			coax.height = base_size.z * 0.4
-			coax.rotation.x = PI / 2
-			coax.position = Vector3(base_size.x * 0.12, base_size.y * 0.18, base_size.z * 0.45)
-			coax.material = barrel_mat
-			root.add_child(coax)
-
-			# Commander's cupola
-			var cupola := CSGCylinder3D.new()
-			cupola.radius = base_size.x * 0.12
-			cupola.height = base_size.y * 0.12
-			cupola.position = Vector3(-base_size.x * 0.15, base_size.y * 0.35, -base_size.z * 0.1)
-			cupola.material = armor_mat
-			root.add_child(cupola)
-
-			# Sensor array
-			var sensor := CSGBox3D.new()
-			sensor.size = Vector3(base_size.x * 0.25, base_size.y * 0.08, base_size.z * 0.12)
-			sensor.position = Vector3(0, base_size.y * 0.35, base_size.z * 0.15)
-			sensor.material = sensor_mat
-			root.add_child(sensor)
-
-			# Tracks with detail
-			for side in [-1, 1]:
-				var track := CSGBox3D.new()
-				track.size = Vector3(base_size.x * 0.18, base_size.y * 0.25, base_size.z * 0.8)
-				track.position = Vector3(base_size.x * 0.5 * side, -base_size.y * 0.25, 0)
-				track.material = track_mat
-				root.add_child(track)
-
-				# Side skirt armor
-				var skirt := CSGBox3D.new()
-				skirt.size = Vector3(base_size.x * 0.05, base_size.y * 0.2, base_size.z * 0.7)
-				skirt.position = Vector3(base_size.x * 0.48 * side, -base_size.y * 0.15, 0)
-				skirt.material = armor_mat
-				root.add_child(skirt)
-
-		"tank", "heavy":
-			# SIEGE TITAN - massive dual-cannon siege tank
-			# Huge armored hull
-			var hull := CSGBox3D.new()
-			hull.size = Vector3(base_size.x * 1.1, base_size.y * 0.4, base_size.z * 0.85)
-			hull.position.y = -base_size.y * 0.1
-			hull.material = mat
-			root.add_child(hull)
-
-			# Heavy front armor
-			var front := CSGBox3D.new()
-			front.size = Vector3(base_size.x * 0.9, base_size.y * 0.35, base_size.z * 0.15)
-			front.position = Vector3(0, 0, base_size.z * 0.45)
-			front.material = armor_mat
-			root.add_child(front)
-
-			# Massive turret
-			var turret := CSGBox3D.new()
-			turret.size = Vector3(base_size.x * 0.75, base_size.y * 0.35, base_size.z * 0.55)
-			turret.position.y = base_size.y * 0.2
-			turret.material = mat
-			root.add_child(turret)
-
-			# Turret top
-			var turret_top := CSGBox3D.new()
-			turret_top.size = Vector3(base_size.x * 0.5, base_size.y * 0.15, base_size.z * 0.4)
-			turret_top.position.y = base_size.y * 0.42
-			turret_top.material = armor_mat
-			root.add_child(turret_top)
-
-			# DUAL SIEGE CANNONS
-			for side in [-1, 1]:
-				var barrel := CSGCylinder3D.new()
-				barrel.radius = base_size.x * 0.08
-				barrel.height = base_size.z * 0.85
-				barrel.rotation.x = PI / 2
-				barrel.position = Vector3(base_size.x * 0.2 * side, base_size.y * 0.25, base_size.z * 0.6)
-				barrel.material = barrel_mat
-				root.add_child(barrel)
-
-				# Muzzle brake
-				var muzzle := CSGCylinder3D.new()
-				muzzle.radius = base_size.x * 0.1
-				muzzle.height = base_size.z * 0.1
-				muzzle.rotation.x = PI / 2
-				muzzle.position = Vector3(base_size.x * 0.2 * side, base_size.y * 0.25, base_size.z * 1.0)
-				muzzle.material = barrel_mat
-				root.add_child(muzzle)
-
-			# Sensor array (large)
-			var sensor := CSGBox3D.new()
-			sensor.size = Vector3(base_size.x * 0.4, base_size.y * 0.12, base_size.z * 0.15)
-			sensor.position = Vector3(0, base_size.y * 0.55, 0)
-			sensor.material = sensor_mat
-			root.add_child(sensor)
-
-			# Antenna cluster
-			for i in range(3):
-				var ant := CSGCylinder3D.new()
-				ant.radius = base_size.x * 0.015
-				ant.height = base_size.y * 0.2
-				ant.position = Vector3(base_size.x * (i - 1) * 0.12, base_size.y * 0.6, -base_size.z * 0.15)
-				ant.material = barrel_mat
-				root.add_child(ant)
-
-			# Heavy tracks
-			for side in [-1, 1]:
-				var track := CSGBox3D.new()
-				track.size = Vector3(base_size.x * 0.22, base_size.y * 0.3, base_size.z * 0.95)
-				track.position = Vector3(base_size.x * 0.6 * side, -base_size.y * 0.25, 0)
-				track.material = track_mat
-				root.add_child(track)
-
-				# Track wheels (visible)
-				for w in range(5):
-					var wheel := CSGCylinder3D.new()
-					wheel.radius = base_size.y * 0.12
-					wheel.height = base_size.x * 0.08
-					wheel.rotation.z = PI / 2
-					wheel.position = Vector3(base_size.x * 0.55 * side, -base_size.y * 0.25, base_size.z * (w - 2) * 0.22)
-					wheel.material = armor_mat
-					root.add_child(wheel)
-
-				# Side armor plates
-				var side_armor := CSGBox3D.new()
-				side_armor.size = Vector3(base_size.x * 0.08, base_size.y * 0.35, base_size.z * 0.85)
-				side_armor.position = Vector3(base_size.x * 0.52 * side, -base_size.y * 0.05, 0)
-				side_armor.material = armor_mat
-				root.add_child(side_armor)
-
-
-## Add Human Remnant visual parts - military vehicles and infantry.
-## Faction theme: Olive drab, conventional military hardware, rugged, practical
-func _add_human_remnant_parts(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, unit_type: String) -> void:
-	# Military olive drab material
-	var military_mat := StandardMaterial3D.new()
-	military_mat.albedo_color = Color(0.35, 0.4, 0.25)
-	military_mat.metallic = 0.3
-	military_mat.roughness = 0.7
-
-	# Dark metal for weapons/equipment
-	var metal_mat := StandardMaterial3D.new()
-	metal_mat.albedo_color = Color(0.2, 0.2, 0.22)
-	metal_mat.metallic = 0.8
-	metal_mat.roughness = 0.4
-
-	# Tan/khaki accent
-	var tan_mat := StandardMaterial3D.new()
-	tan_mat.albedo_color = Color(0.6, 0.5, 0.35)
-	tan_mat.metallic = 0.2
-	tan_mat.roughness = 0.6
-
-	# Red accent (warning lights, insignia)
-	var red_mat := StandardMaterial3D.new()
-	red_mat.albedo_color = Color(0.8, 0.2, 0.15)
-	red_mat.emission_enabled = true
-	red_mat.emission = Color(0.7, 0.15, 0.1)
-	red_mat.emission_energy_multiplier = 1.5
-
-	match unit_type:
-		"scout", "light":
-			# INFANTRY SCOUT - soldier with rifle and backpack
-			# Torso
-			var torso := CSGBox3D.new()
-			torso.size = Vector3(base_size.x * 0.4, base_size.y * 0.35, base_size.z * 0.25)
-			torso.position.y = base_size.y * 0.1
-			torso.material = military_mat
-			root.add_child(torso)
-
-			# Head with helmet
-			var head := CSGSphere3D.new()
-			head.radius = base_size.x * 0.15
-			head.position = Vector3(0, base_size.y * 0.4, 0)
-			head.material = military_mat
-			root.add_child(head)
-
-			# Helmet brim
-			var helmet := CSGCylinder3D.new()
-			helmet.radius = base_size.x * 0.18
-			helmet.height = base_size.y * 0.08
-			helmet.position = Vector3(0, base_size.y * 0.42, 0)
-			helmet.material = military_mat
-			root.add_child(helmet)
-
-			# Visor/goggles
-			var visor := CSGBox3D.new()
-			visor.size = Vector3(base_size.x * 0.2, base_size.y * 0.05, base_size.z * 0.05)
-			visor.position = Vector3(0, base_size.y * 0.38, base_size.z * 0.12)
-			visor.material = red_mat
-			root.add_child(visor)
-
-			# Legs
-			for side in [-1.0, 1.0]:
-				var leg := CSGCylinder3D.new()
-				leg.radius = base_size.x * 0.08
-				leg.height = base_size.y * 0.35
-				leg.position = Vector3(side * base_size.x * 0.12, -base_size.y * 0.25, 0)
-				leg.material = military_mat
-				root.add_child(leg)
-
-				# Boot
-				var boot := CSGBox3D.new()
-				boot.size = Vector3(base_size.x * 0.1, base_size.y * 0.08, base_size.z * 0.15)
-				boot.position = Vector3(side * base_size.x * 0.12, -base_size.y * 0.45, base_size.z * 0.03)
-				boot.material = tan_mat
-				root.add_child(boot)
-
-			# Arms
-			for side in [-1.0, 1.0]:
-				var arm := CSGCylinder3D.new()
-				arm.radius = base_size.x * 0.06
-				arm.height = base_size.y * 0.25
-				arm.position = Vector3(side * base_size.x * 0.25, base_size.y * 0.05, 0)
-				arm.rotation.z = side * 0.3
-				arm.material = military_mat
-				root.add_child(arm)
-
-			# Rifle (held diagonally across body)
-			var rifle := CSGBox3D.new()
-			rifle.size = Vector3(base_size.x * 0.06, base_size.y * 0.5, base_size.z * 0.06)
-			rifle.position = Vector3(base_size.x * 0.15, base_size.y * 0.1, base_size.z * 0.15)
-			rifle.rotation.z = -0.3
-			rifle.rotation.x = 0.2
-			rifle.material = metal_mat
-			root.add_child(rifle)
-
-			# Backpack
-			var pack := CSGBox3D.new()
-			pack.size = Vector3(base_size.x * 0.3, base_size.y * 0.25, base_size.z * 0.15)
-			pack.position = Vector3(0, base_size.y * 0.1, -base_size.z * 0.18)
-			pack.material = tan_mat
-			root.add_child(pack)
-
-		"soldier", "medium":
-			# HEAVY TROOPER - armored soldier with heavy weapon
-			# Armored torso (bulkier)
-			var torso := CSGBox3D.new()
-			torso.size = Vector3(base_size.x * 0.5, base_size.y * 0.4, base_size.z * 0.35)
-			torso.position.y = base_size.y * 0.05
-			torso.material = military_mat
-			root.add_child(torso)
-
-			# Chest armor plate
-			var chest := CSGBox3D.new()
-			chest.size = Vector3(base_size.x * 0.45, base_size.y * 0.3, base_size.z * 0.08)
-			chest.position = Vector3(0, base_size.y * 0.08, base_size.z * 0.2)
-			chest.material = tan_mat
-			root.add_child(chest)
-
-			# Helmeted head
-			var head := CSGBox3D.new()
-			head.size = Vector3(base_size.x * 0.3, base_size.y * 0.25, base_size.z * 0.28)
-			head.position = Vector3(0, base_size.y * 0.35, 0)
-			head.material = military_mat
-			root.add_child(head)
-
-			# Face plate / visor
-			var visor := CSGBox3D.new()
-			visor.size = Vector3(base_size.x * 0.22, base_size.y * 0.1, base_size.z * 0.05)
-			visor.position = Vector3(0, base_size.y * 0.33, base_size.z * 0.15)
-			visor.material = red_mat
-			root.add_child(visor)
-
-			# Shoulder pads
-			for side in [-1.0, 1.0]:
-				var shoulder := CSGBox3D.new()
-				shoulder.size = Vector3(base_size.x * 0.18, base_size.y * 0.12, base_size.z * 0.2)
-				shoulder.position = Vector3(side * base_size.x * 0.32, base_size.y * 0.2, 0)
-				shoulder.material = tan_mat
-				root.add_child(shoulder)
-
-			# Legs (armored)
-			for side in [-1.0, 1.0]:
-				var thigh := CSGBox3D.new()
-				thigh.size = Vector3(base_size.x * 0.15, base_size.y * 0.2, base_size.z * 0.15)
-				thigh.position = Vector3(side * base_size.x * 0.15, -base_size.y * 0.2, 0)
-				thigh.material = military_mat
-				root.add_child(thigh)
-
-				var shin := CSGBox3D.new()
-				shin.size = Vector3(base_size.x * 0.12, base_size.y * 0.2, base_size.z * 0.12)
-				shin.position = Vector3(side * base_size.x * 0.15, -base_size.y * 0.4, 0)
-				shin.material = military_mat
-				root.add_child(shin)
-
-			# Heavy machine gun (on right side)
-			var gun_body := CSGBox3D.new()
-			gun_body.size = Vector3(base_size.x * 0.1, base_size.y * 0.12, base_size.z * 0.45)
-			gun_body.position = Vector3(base_size.x * 0.35, base_size.y * 0.0, base_size.z * 0.2)
-			gun_body.material = metal_mat
-			root.add_child(gun_body)
-
-			# Gun barrel
-			var barrel := CSGCylinder3D.new()
-			barrel.radius = base_size.x * 0.03
-			barrel.height = base_size.z * 0.3
-			barrel.rotation.x = PI / 2
-			barrel.position = Vector3(base_size.x * 0.35, base_size.y * 0.0, base_size.z * 0.55)
-			barrel.material = metal_mat
-			root.add_child(barrel)
-
-			# Ammo belt/box
-			var ammo := CSGBox3D.new()
-			ammo.size = Vector3(base_size.x * 0.15, base_size.y * 0.15, base_size.z * 0.1)
-			ammo.position = Vector3(base_size.x * 0.25, -base_size.y * 0.1, base_size.z * 0.1)
-			ammo.material = tan_mat
-			root.add_child(ammo)
-
-		"tank", "heavy":
-			# MILITARY APC / ARMORED VEHICLE - tracked vehicle with turret
-			# Main hull
-			var hull := CSGBox3D.new()
-			hull.size = Vector3(base_size.x * 0.8, base_size.y * 0.35, base_size.z * 0.9)
-			hull.position.y = -base_size.y * 0.05
-			hull.material = military_mat
-			root.add_child(hull)
-
-			# Sloped front armor
-			var front := CSGBox3D.new()
-			front.size = Vector3(base_size.x * 0.75, base_size.y * 0.25, base_size.z * 0.15)
-			front.position = Vector3(0, base_size.y * 0.05, base_size.z * 0.45)
-			front.rotation.x = -0.4
-			front.material = military_mat
-			root.add_child(front)
-
-			# Track assemblies
-			for side in [-1.0, 1.0]:
-				var track := CSGBox3D.new()
-				track.size = Vector3(base_size.x * 0.15, base_size.y * 0.3, base_size.z * 0.95)
-				track.position = Vector3(side * base_size.x * 0.45, -base_size.y * 0.1, 0)
-				track.material = metal_mat
-				root.add_child(track)
-
-				# Road wheels (5 per side)
-				for w in range(5):
-					var wheel := CSGCylinder3D.new()
-					wheel.radius = base_size.y * 0.12
-					wheel.height = base_size.x * 0.06
-					wheel.rotation.z = PI / 2
-					wheel.position = Vector3(side * base_size.x * 0.52, -base_size.y * 0.15, (w - 2) * base_size.z * 0.2)
-					wheel.material = metal_mat
-					root.add_child(wheel)
-
-			# Turret base
-			var turret_base := CSGCylinder3D.new()
-			turret_base.radius = base_size.x * 0.25
-			turret_base.height = base_size.y * 0.15
-			turret_base.position = Vector3(0, base_size.y * 0.2, -base_size.z * 0.1)
-			turret_base.material = military_mat
-			root.add_child(turret_base)
-
-			# Turret housing
-			var turret := CSGBox3D.new()
-			turret.size = Vector3(base_size.x * 0.4, base_size.y * 0.2, base_size.z * 0.35)
-			turret.position = Vector3(0, base_size.y * 0.35, -base_size.z * 0.05)
-			turret.material = military_mat
-			root.add_child(turret)
-
-			# Main cannon
-			var cannon := CSGCylinder3D.new()
-			cannon.radius = base_size.x * 0.06
-			cannon.height = base_size.z * 0.7
-			cannon.rotation.x = PI / 2
-			cannon.position = Vector3(0, base_size.y * 0.35, base_size.z * 0.45)
-			cannon.material = metal_mat
-			root.add_child(cannon)
-
-			# Coaxial machine gun
-			var coax := CSGCylinder3D.new()
-			coax.radius = base_size.x * 0.025
-			coax.height = base_size.z * 0.4
-			coax.rotation.x = PI / 2
-			coax.position = Vector3(base_size.x * 0.12, base_size.y * 0.32, base_size.z * 0.35)
-			coax.material = metal_mat
-			root.add_child(coax)
-
-			# Antenna
-			var antenna := CSGCylinder3D.new()
-			antenna.radius = base_size.x * 0.015
-			antenna.height = base_size.y * 0.4
-			antenna.position = Vector3(-base_size.x * 0.3, base_size.y * 0.45, -base_size.z * 0.3)
-			antenna.material = metal_mat
-			root.add_child(antenna)
-
-			# Hatches
-			for hatch_x in [-0.15, 0.15]:
-				var hatch := CSGCylinder3D.new()
-				hatch.radius = base_size.x * 0.08
-				hatch.height = base_size.y * 0.05
-				hatch.position = Vector3(hatch_x * base_size.x, base_size.y * 0.47, -base_size.z * 0.15)
-				hatch.material = tan_mat
-				root.add_child(hatch)
-
-			# Rear stowage box
-			var stowage := CSGBox3D.new()
-			stowage.size = Vector3(base_size.x * 0.6, base_size.y * 0.15, base_size.z * 0.12)
-			stowage.position = Vector3(0, base_size.y * 0.05, -base_size.z * 0.5)
-			stowage.material = tan_mat
-			root.add_child(stowage)
-
-			# Warning light
-			var light := CSGSphere3D.new()
-			light.radius = base_size.x * 0.04
-			light.position = Vector3(base_size.x * 0.35, base_size.y * 0.15, base_size.z * 0.35)
-			light.material = red_mat
-			root.add_child(light)
-
-
-## Add harvester visual parts - faction-specific collector designs.
-## Each faction has a unique non-combat collector themed to their aesthetics.
-func _add_harvester_parts(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, faction_id: int, faction_color: Color) -> void:
-	# Gold/amber accent for all harvesters to distinguish from combat units
-	var gold_accent := StandardMaterial3D.new()
-	gold_accent.albedo_color = Color(0.85, 0.7, 0.2)
-	gold_accent.metallic = 0.9
-	gold_accent.roughness = 0.3
-	gold_accent.emission_enabled = true
-	gold_accent.emission = Color(0.9, 0.7, 0.15)
-	gold_accent.emission_energy_multiplier = 0.8
-
-	# Set up faction-colored base material
-	mat.albedo_color = faction_color * 0.8 + Color(0.2, 0.15, 0.0)  # Slightly golden tint
-	mat.emission = faction_color * 0.3
-	mat.metallic = 0.6
-
-	match faction_id:
-		1:  # Aether Swarm - PHASE COLLECTOR
-			# Small hovering drone with energy scoops, ethereal and translucent
-			_add_aether_harvester(root, base_size, mat, gold_accent)
-		2:  # OptiForge Legion - WORKER UNIT
-			# Industrial humanoid with collection claws and backpack container
-			_add_optiforge_harvester(root, base_size, mat, gold_accent)
-		3:  # Dynapods Vanguard - SCAVENGER CRAB
-			# Low-profile multi-legged with pincers and shell storage
-			_add_dynapods_harvester(root, base_size, mat, gold_accent)
-		4:  # LogiBots Colossus - MINING VEHICLE
-			# Tracked vehicle with crane arm and cargo hopper
-			_add_logibots_harvester(root, base_size, mat, gold_accent)
-		5:  # Human Remnant - SUPPLY TRUCK
-			# Military cargo truck for salvage operations
-			_add_human_harvester(root, base_size, mat, gold_accent)
-		_:  # Default simple harvester
-			_add_default_harvester(root, base_size, mat, gold_accent)
-
-
-## Aether Swarm harvester - Phase Collector drone with energy scoops
-func _add_aether_harvester(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, gold: StandardMaterial3D) -> void:
-	# Translucent energy material
-	var energy_mat := StandardMaterial3D.new()
-	energy_mat.albedo_color = Color(0.5, 0.9, 1.0, 0.5)
-	energy_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	energy_mat.emission_enabled = true
-	energy_mat.emission = Color(0.4, 0.85, 1.0)
-	energy_mat.emission_energy_multiplier = 2.0
-
-	# Small central core - compact oval body
-	var core := CSGSphere3D.new()
-	core.radius = base_size.x * 0.3
-	core.radial_segments = 12
-	core.rings = 8
-	core.material = mat
-	root.add_child(core)
-
-	# Energy collection ring (torus-like using cylinder)
-	var ring := CSGCylinder3D.new()
-	ring.radius = base_size.x * 0.45
-	ring.height = base_size.y * 0.08
-	ring.position.y = base_size.y * 0.1
-	ring.material = energy_mat
-	root.add_child(ring)
-
-	# Four small hover pods underneath
-	for i in range(4):
-		var angle: float = (i * PI / 2) + (PI / 4)
-		var pod := CSGSphere3D.new()
-		pod.radius = base_size.x * 0.08
-		pod.position = Vector3(cos(angle) * base_size.x * 0.35, -base_size.y * 0.15, sin(angle) * base_size.z * 0.35)
-		pod.material = gold
-		root.add_child(pod)
-
-	# Energy scoop arms (2 translucent collector tendrils)
-	for side in [-1.0, 1.0]:
-		var arm := CSGCylinder3D.new()
-		arm.radius = base_size.x * 0.03
-		arm.height = base_size.x * 0.5
-		arm.position = Vector3(side * base_size.x * 0.3, -base_size.y * 0.1, base_size.z * 0.2)
-		arm.rotation.z = side * 0.4
-		arm.rotation.x = 0.3
-		arm.material = energy_mat
-		root.add_child(arm)
-
-		# Scoop tip
-		var tip := CSGSphere3D.new()
-		tip.radius = base_size.x * 0.06
-		tip.position = Vector3(side * base_size.x * 0.5, -base_size.y * 0.25, base_size.z * 0.35)
-		tip.material = gold
-		root.add_child(tip)
-
-	# Small cargo container on top (translucent to show collected REE)
-	var cargo := CSGBox3D.new()
-	cargo.size = Vector3(base_size.x * 0.35, base_size.y * 0.25, base_size.z * 0.35)
-	cargo.position = Vector3(0, base_size.y * 0.25, -base_size.z * 0.1)
-	var cargo_mat := energy_mat.duplicate()
-	cargo_mat.albedo_color = Color(0.9, 0.8, 0.3, 0.6)
-	cargo_mat.emission = Color(0.9, 0.75, 0.2)
-	cargo.material = cargo_mat
-	root.add_child(cargo)
-
-
-## OptiForge Legion harvester - Worker Unit with claws and backpack
-func _add_optiforge_harvester(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, gold: StandardMaterial3D) -> void:
-	# Industrial accent
-	var industrial_mat := StandardMaterial3D.new()
-	industrial_mat.albedo_color = Color(0.3, 0.3, 0.35)
-	industrial_mat.metallic = 0.8
-	industrial_mat.roughness = 0.4
-
-	# Squat torso - wider than tall (worker bot)
-	var torso := CSGBox3D.new()
-	torso.size = Vector3(base_size.x * 0.6, base_size.y * 0.5, base_size.z * 0.5)
-	torso.material = mat
-	root.add_child(torso)
-
-	# Small head with visor
-	var head := CSGBox3D.new()
-	head.size = Vector3(base_size.x * 0.3, base_size.y * 0.2, base_size.z * 0.25)
-	head.position = Vector3(0, base_size.y * 0.35, base_size.z * 0.1)
-	head.material = mat
-	root.add_child(head)
-
-	# Yellow visor
-	var visor := CSGBox3D.new()
-	visor.size = Vector3(base_size.x * 0.25, base_size.y * 0.08, base_size.z * 0.05)
-	visor.position = Vector3(0, base_size.y * 0.38, base_size.z * 0.25)
-	visor.material = gold
-	root.add_child(visor)
-
-	# Stubby legs (2)
-	for side in [-1.0, 1.0]:
-		var leg := CSGCylinder3D.new()
-		leg.radius = base_size.x * 0.1
-		leg.height = base_size.y * 0.35
-		leg.position = Vector3(side * base_size.x * 0.2, -base_size.y * 0.35, 0)
-		leg.material = industrial_mat
-		root.add_child(leg)
-
-		# Foot
-		var foot := CSGBox3D.new()
-		foot.size = Vector3(base_size.x * 0.15, base_size.y * 0.08, base_size.z * 0.2)
-		foot.position = Vector3(side * base_size.x * 0.2, -base_size.y * 0.55, base_size.z * 0.05)
-		foot.material = industrial_mat
-		root.add_child(foot)
-
-	# Collection claw arms (instead of weapons)
-	for side in [-1.0, 1.0]:
-		# Upper arm
-		var upper := CSGCylinder3D.new()
-		upper.radius = base_size.x * 0.06
-		upper.height = base_size.x * 0.3
-		upper.position = Vector3(side * base_size.x * 0.35, base_size.y * 0.1, base_size.z * 0.1)
-		upper.rotation.z = side * 0.5
-		upper.material = mat
-		root.add_child(upper)
-
-		# Forearm with claw
-		var forearm := CSGCylinder3D.new()
-		forearm.radius = base_size.x * 0.05
-		forearm.height = base_size.x * 0.25
-		forearm.position = Vector3(side * base_size.x * 0.5, -base_size.y * 0.05, base_size.z * 0.2)
-		forearm.rotation.x = 0.4
-		forearm.material = industrial_mat
-		root.add_child(forearm)
-
-		# Claw pincers (2 per arm)
-		for pincer in [-0.5, 0.5]:
-			var claw := CSGBox3D.new()
-			claw.size = Vector3(base_size.x * 0.02, base_size.y * 0.15, base_size.z * 0.04)
-			claw.position = Vector3(side * base_size.x * 0.52 + pincer * base_size.x * 0.05, -base_size.y * 0.2, base_size.z * 0.35)
-			claw.rotation.x = 0.3
-			claw.material = gold
-			root.add_child(claw)
-
-	# Large backpack storage container
-	var backpack := CSGBox3D.new()
-	backpack.size = Vector3(base_size.x * 0.5, base_size.y * 0.6, base_size.z * 0.4)
-	backpack.position = Vector3(0, base_size.y * 0.1, -base_size.z * 0.35)
-	backpack.material = industrial_mat
-	root.add_child(backpack)
-
-	# Gold trim on backpack
-	var trim := CSGBox3D.new()
-	trim.size = Vector3(base_size.x * 0.52, base_size.y * 0.05, base_size.z * 0.42)
-	trim.position = Vector3(0, base_size.y * 0.4, -base_size.z * 0.35)
-	trim.material = gold
-	root.add_child(trim)
-
-
-## Dynapods Vanguard harvester - Scavenger Crab with pincers
-func _add_dynapods_harvester(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, gold: StandardMaterial3D) -> void:
-	# Chitin-like material
-	var shell_mat := mat.duplicate()
-	shell_mat.roughness = 0.5
-
-	# Low, wide shell body (crab-like)
-	var shell := CSGBox3D.new()
-	shell.size = Vector3(base_size.x * 0.7, base_size.y * 0.3, base_size.z * 0.5)
-	shell.position.y = base_size.y * 0.05
-	shell.material = shell_mat
-	root.add_child(shell)
-
-	# Domed top shell
-	var dome := CSGSphere3D.new()
-	dome.radius = base_size.x * 0.35
-	dome.radial_segments = 12
-	dome.rings = 6
-	dome.position = Vector3(0, base_size.y * 0.15, 0)
-	dome.scale = Vector3(1.0, 0.5, 0.8)
-	dome.material = shell_mat
-	root.add_child(dome)
-
-	# Six scuttling legs (3 per side)
-	for side in [-1.0, 1.0]:
-		for leg_idx in range(3):
-			var z_offset: float = (leg_idx - 1) * base_size.z * 0.2
-
-			# Upper leg segment
-			var upper := CSGCylinder3D.new()
-			upper.radius = base_size.x * 0.03
-			upper.height = base_size.x * 0.25
-			upper.position = Vector3(side * base_size.x * 0.35, base_size.y * 0.05, z_offset)
-			upper.rotation.z = side * 1.0  # Angled outward
-			upper.material = mat
-			root.add_child(upper)
-
-			# Lower leg segment
-			var lower := CSGCylinder3D.new()
-			lower.radius = base_size.x * 0.025
-			lower.height = base_size.x * 0.2
-			lower.position = Vector3(side * base_size.x * 0.55, -base_size.y * 0.15, z_offset)
-			lower.rotation.z = side * -0.3
-			lower.material = mat
-			root.add_child(lower)
-
-	# Two large collection pincers in front
-	for side in [-1.0, 1.0]:
-		# Pincer arm
-		var arm := CSGCylinder3D.new()
-		arm.radius = base_size.x * 0.05
-		arm.height = base_size.x * 0.35
-		arm.position = Vector3(side * base_size.x * 0.25, base_size.y * 0.1, base_size.z * 0.35)
-		arm.rotation.x = 0.5
-		arm.rotation.z = side * 0.3
-		arm.material = mat
-		root.add_child(arm)
-
-		# Large pincer claw (two parts)
-		var claw_base := CSGBox3D.new()
-		claw_base.size = Vector3(base_size.x * 0.08, base_size.y * 0.2, base_size.z * 0.06)
-		claw_base.position = Vector3(side * base_size.x * 0.28, base_size.y * 0.0, base_size.z * 0.55)
-		claw_base.material = gold
-		root.add_child(claw_base)
-
-		var claw_tip := CSGBox3D.new()
-		claw_tip.size = Vector3(base_size.x * 0.06, base_size.y * 0.15, base_size.z * 0.04)
-		claw_tip.position = Vector3(side * base_size.x * 0.28 + side * base_size.x * 0.05, base_size.y * -0.05, base_size.z * 0.55)
-		claw_tip.rotation.z = side * -0.4
-		claw_tip.material = gold
-		root.add_child(claw_tip)
-
-	# Small eye stalks
-	for side in [-1.0, 1.0]:
-		var stalk := CSGCylinder3D.new()
-		stalk.radius = base_size.x * 0.02
-		stalk.height = base_size.y * 0.15
-		stalk.position = Vector3(side * base_size.x * 0.1, base_size.y * 0.3, base_size.z * 0.2)
-		stalk.material = mat
-		root.add_child(stalk)
-
-		var eye := CSGSphere3D.new()
-		eye.radius = base_size.x * 0.035
-		eye.position = Vector3(side * base_size.x * 0.1, base_size.y * 0.4, base_size.z * 0.2)
-		eye.material = gold
-		root.add_child(eye)
-
-	# Storage cavity on back (slightly open shell)
-	var cavity := CSGBox3D.new()
-	cavity.size = Vector3(base_size.x * 0.4, base_size.y * 0.2, base_size.z * 0.25)
-	cavity.position = Vector3(0, base_size.y * 0.2, -base_size.z * 0.15)
-	var cavity_mat := StandardMaterial3D.new()
-	cavity_mat.albedo_color = Color(0.15, 0.12, 0.1)
-	cavity.material = cavity_mat
-	root.add_child(cavity)
-
-
-## LogiBots Colossus harvester - Mining Vehicle with crane
-func _add_logibots_harvester(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, gold: StandardMaterial3D) -> void:
-	# Heavy industrial material
-	var steel_mat := StandardMaterial3D.new()
-	steel_mat.albedo_color = Color(0.25, 0.28, 0.3)
-	steel_mat.metallic = 0.9
-	steel_mat.roughness = 0.5
-
-	# Wide tracked chassis
-	var chassis := CSGBox3D.new()
-	chassis.size = Vector3(base_size.x * 0.8, base_size.y * 0.3, base_size.z * 0.6)
-	chassis.position.y = -base_size.y * 0.1
-	chassis.material = mat
-	root.add_child(chassis)
-
-	# Track assemblies (2 side pods)
-	for side in [-1.0, 1.0]:
-		var track := CSGBox3D.new()
-		track.size = Vector3(base_size.x * 0.15, base_size.y * 0.25, base_size.z * 0.7)
-		track.position = Vector3(side * base_size.x * 0.45, -base_size.y * 0.15, 0)
-		track.material = steel_mat
-		root.add_child(track)
-
-		# Track wheels (3 per side)
-		for w in range(3):
-			var wheel := CSGCylinder3D.new()
-			wheel.radius = base_size.y * 0.1
-			wheel.height = base_size.x * 0.05
-			wheel.position = Vector3(side * base_size.x * 0.52, -base_size.y * 0.2, (w - 1) * base_size.z * 0.25)
-			wheel.rotation.z = PI / 2
-			wheel.material = steel_mat
-			root.add_child(wheel)
-
-	# Large cargo hopper on back
-	var hopper := CSGBox3D.new()
-	hopper.size = Vector3(base_size.x * 0.6, base_size.y * 0.5, base_size.z * 0.4)
-	hopper.position = Vector3(0, base_size.y * 0.2, -base_size.z * 0.15)
-	hopper.material = steel_mat
-	root.add_child(hopper)
-
-	# Hopper rim (gold accent)
-	var rim := CSGBox3D.new()
-	rim.size = Vector3(base_size.x * 0.65, base_size.y * 0.06, base_size.z * 0.45)
-	rim.position = Vector3(0, base_size.y * 0.47, -base_size.z * 0.15)
-	rim.material = gold
-	root.add_child(rim)
-
-	# Small cab/control module
-	var cab := CSGBox3D.new()
-	cab.size = Vector3(base_size.x * 0.35, base_size.y * 0.25, base_size.z * 0.25)
-	cab.position = Vector3(-base_size.x * 0.15, base_size.y * 0.25, base_size.z * 0.2)
-	cab.material = mat
-	root.add_child(cab)
-
-	# Cab window
-	var window := CSGBox3D.new()
-	window.size = Vector3(base_size.x * 0.25, base_size.y * 0.12, base_size.z * 0.03)
-	window.position = Vector3(-base_size.x * 0.15, base_size.y * 0.32, base_size.z * 0.35)
-	var window_mat := StandardMaterial3D.new()
-	window_mat.albedo_color = Color(0.2, 0.3, 0.4)
-	window_mat.metallic = 0.5
-	window_mat.emission_enabled = true
-	window_mat.emission = Color(0.1, 0.2, 0.3)
-	window.material = window_mat
-	root.add_child(window)
-
-	# Crane arm assembly
-	# Base turret
-	var turret := CSGCylinder3D.new()
-	turret.radius = base_size.x * 0.12
-	turret.height = base_size.y * 0.15
-	turret.position = Vector3(base_size.x * 0.2, base_size.y * 0.2, base_size.z * 0.15)
-	turret.material = steel_mat
-	root.add_child(turret)
-
-	# Main crane arm
-	var arm1 := CSGBox3D.new()
-	arm1.size = Vector3(base_size.x * 0.08, base_size.y * 0.4, base_size.z * 0.08)
-	arm1.position = Vector3(base_size.x * 0.2, base_size.y * 0.45, base_size.z * 0.15)
-	arm1.rotation.x = -0.3
-	arm1.material = gold
-	root.add_child(arm1)
-
-	# Crane forearm
-	var arm2 := CSGBox3D.new()
-	arm2.size = Vector3(base_size.x * 0.06, base_size.y * 0.35, base_size.z * 0.06)
-	arm2.position = Vector3(base_size.x * 0.2, base_size.y * 0.55, base_size.z * 0.4)
-	arm2.rotation.x = 0.6
-	arm2.material = gold
-	root.add_child(arm2)
-
-	# Excavator bucket/scoop at end
-	var bucket := CSGBox3D.new()
-	bucket.size = Vector3(base_size.x * 0.2, base_size.y * 0.15, base_size.z * 0.15)
-	bucket.position = Vector3(base_size.x * 0.2, base_size.y * 0.35, base_size.z * 0.6)
-	bucket.rotation.x = 0.8
-	bucket.material = steel_mat
-	root.add_child(bucket)
-
-	# Bucket teeth
-	for t in range(3):
-		var tooth := CSGBox3D.new()
-		tooth.size = Vector3(base_size.x * 0.03, base_size.y * 0.08, base_size.z * 0.03)
-		tooth.position = Vector3(base_size.x * 0.2 + (t - 1) * base_size.x * 0.06, base_size.y * 0.25, base_size.z * 0.7)
-		tooth.material = gold
-		root.add_child(tooth)
-
-	# Warning light on cab
-	var light := CSGSphere3D.new()
-	light.radius = base_size.x * 0.05
-	light.position = Vector3(-base_size.x * 0.15, base_size.y * 0.42, base_size.z * 0.2)
-	light.material = gold
-	root.add_child(light)
-
-
-## Human Remnant harvester - Military Supply Truck
-func _add_human_harvester(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, gold: StandardMaterial3D) -> void:
-	# Military olive drab
-	var military_mat := StandardMaterial3D.new()
-	military_mat.albedo_color = Color(0.35, 0.4, 0.25)
-	military_mat.metallic = 0.3
-	military_mat.roughness = 0.7
-
-	# Canvas/tarp material for cargo cover
-	var canvas_mat := StandardMaterial3D.new()
-	canvas_mat.albedo_color = Color(0.5, 0.45, 0.35)
-	canvas_mat.roughness = 0.9
-
-	# Dark metal
-	var metal_mat := StandardMaterial3D.new()
-	metal_mat.albedo_color = Color(0.2, 0.2, 0.22)
-	metal_mat.metallic = 0.8
-
-	# Red tail lights
-	var red_mat := StandardMaterial3D.new()
-	red_mat.albedo_color = Color(0.8, 0.2, 0.15)
-	red_mat.emission_enabled = true
-	red_mat.emission = Color(0.6, 0.1, 0.05)
-	red_mat.emission_energy_multiplier = 1.2
-
-	# Truck cab
-	var cab := CSGBox3D.new()
-	cab.size = Vector3(base_size.x * 0.5, base_size.y * 0.45, base_size.z * 0.35)
-	cab.position = Vector3(0, base_size.y * 0.1, base_size.z * 0.3)
-	cab.material = military_mat
-	root.add_child(cab)
-
-	# Windshield
-	var windshield := CSGBox3D.new()
-	windshield.size = Vector3(base_size.x * 0.4, base_size.y * 0.2, base_size.z * 0.05)
-	windshield.position = Vector3(0, base_size.y * 0.25, base_size.z * 0.5)
-	windshield.rotation.x = -0.2
-	var glass_mat := StandardMaterial3D.new()
-	glass_mat.albedo_color = Color(0.3, 0.35, 0.4)
-	glass_mat.metallic = 0.4
-	windshield.material = glass_mat
-	root.add_child(windshield)
-
-	# Cab roof
-	var roof := CSGBox3D.new()
-	roof.size = Vector3(base_size.x * 0.52, base_size.y * 0.08, base_size.z * 0.38)
-	roof.position = Vector3(0, base_size.y * 0.36, base_size.z * 0.3)
-	roof.material = military_mat
-	root.add_child(roof)
-
-	# Truck bed frame
-	var bed := CSGBox3D.new()
-	bed.size = Vector3(base_size.x * 0.6, base_size.y * 0.1, base_size.z * 0.55)
-	bed.position = Vector3(0, -base_size.y * 0.1, -base_size.z * 0.15)
-	bed.material = military_mat
-	root.add_child(bed)
-
-	# Cargo area with canvas cover (curved top using box approximation)
-	var cargo_base := CSGBox3D.new()
-	cargo_base.size = Vector3(base_size.x * 0.55, base_size.y * 0.35, base_size.z * 0.5)
-	cargo_base.position = Vector3(0, base_size.y * 0.12, -base_size.z * 0.15)
-	cargo_base.material = canvas_mat
-	root.add_child(cargo_base)
-
-	# Canvas top (rounded appearance)
-	var cargo_top := CSGCylinder3D.new()
-	cargo_top.radius = base_size.x * 0.28
-	cargo_top.height = base_size.z * 0.5
-	cargo_top.rotation.x = PI / 2
-	cargo_top.position = Vector3(0, base_size.y * 0.32, -base_size.z * 0.15)
-	cargo_top.material = canvas_mat
-	root.add_child(cargo_top)
-
-	# Front wheels (2)
-	for side in [-1.0, 1.0]:
-		var wheel := CSGCylinder3D.new()
-		wheel.radius = base_size.y * 0.15
-		wheel.height = base_size.x * 0.08
-		wheel.rotation.z = PI / 2
-		wheel.position = Vector3(side * base_size.x * 0.3, -base_size.y * 0.25, base_size.z * 0.25)
-		wheel.material = metal_mat
-		root.add_child(wheel)
-
-	# Rear wheels (4 - dual axle)
-	for side in [-1.0, 1.0]:
-		for axle in [0.0, -0.15]:
-			var wheel := CSGCylinder3D.new()
-			wheel.radius = base_size.y * 0.15
-			wheel.height = base_size.x * 0.08
-			wheel.rotation.z = PI / 2
-			wheel.position = Vector3(side * base_size.x * 0.3, -base_size.y * 0.25, -base_size.z * 0.25 + axle * base_size.z)
-			wheel.material = metal_mat
-			root.add_child(wheel)
-
-	# Headlights
-	for side in [-1.0, 1.0]:
-		var headlight := CSGSphere3D.new()
-		headlight.radius = base_size.x * 0.05
-		headlight.position = Vector3(side * base_size.x * 0.2, base_size.y * 0.0, base_size.z * 0.5)
-		headlight.material = gold
-		root.add_child(headlight)
-
-	# Tail lights
-	for side in [-1.0, 1.0]:
-		var taillight := CSGBox3D.new()
-		taillight.size = Vector3(base_size.x * 0.06, base_size.y * 0.08, base_size.z * 0.03)
-		taillight.position = Vector3(side * base_size.x * 0.25, base_size.y * 0.0, -base_size.z * 0.42)
-		taillight.material = red_mat
-		root.add_child(taillight)
-
-	# Side mirrors
-	for side in [-1.0, 1.0]:
-		var mirror := CSGBox3D.new()
-		mirror.size = Vector3(base_size.x * 0.04, base_size.y * 0.08, base_size.z * 0.06)
-		mirror.position = Vector3(side * base_size.x * 0.3, base_size.y * 0.2, base_size.z * 0.35)
-		mirror.material = metal_mat
-		root.add_child(mirror)
-
-	# Spare tire on back
-	var spare := CSGCylinder3D.new()
-	spare.radius = base_size.y * 0.12
-	spare.height = base_size.x * 0.06
-	spare.rotation.x = PI / 2
-	spare.position = Vector3(0, base_size.y * 0.15, -base_size.z * 0.45)
-	spare.material = metal_mat
-	root.add_child(spare)
-
-
-## Default harvester fallback
-func _add_default_harvester(root: Node3D, base_size: Vector3, mat: StandardMaterial3D, gold: StandardMaterial3D) -> void:
-	# Simple box body
-	var body := CSGBox3D.new()
-	body.size = base_size
-	body.material = mat
-	root.add_child(body)
-
-	# Collection scoop
-	var scoop := CSGBox3D.new()
-	scoop.size = Vector3(base_size.x * 0.6, base_size.y * 0.3, base_size.z * 0.8)
-	scoop.position = Vector3(base_size.x * 0.5, -base_size.y * 0.2, 0)
-	scoop.material = gold
-	root.add_child(scoop)
-
-	# Storage container
-	var container := CSGBox3D.new()
-	container.size = Vector3(base_size.x * 0.7, base_size.y * 0.5, base_size.z * 0.5)
-	container.position = Vector3(-base_size.x * 0.3, base_size.y * 0.1, 0)
-	var container_mat := mat.duplicate()
-	container_mat.albedo_color = mat.albedo_color * 0.7
-	container.material = container_mat
-	root.add_child(container)
-
-	# Indicator light
-	var light := CSGSphere3D.new()
-	light.radius = base_size.x * 0.1
-	light.position = Vector3(0, base_size.y * 0.5, base_size.z * 0.3)
-	light.material = gold
-	root.add_child(light)
 
 
 func _spawn_unit(faction_id: int, position: Vector3, unit_type: String = "soldier") -> Dictionary:
@@ -10675,6 +12699,31 @@ func _spawn_unit(faction_id: int, position: Vector3, unit_type: String = "soldie
 	if faction_id == 4 and _coordinated_barrage != null:
 		_coordinated_barrage.register_unit(unit_id)
 
+	# Register with MultiMesh rendering system for batched draw calls
+	if _multimesh_renderer != null and _use_multimesh_rendering:
+		# Map faction_id to MultiMeshRenderer faction constants (0-4)
+		var mm_faction_id := faction_id - 1  # main.gd uses 1-5, MultiMesh uses 0-4
+		mm_faction_id = clampi(mm_faction_id, 0, 4)
+		# Map unit_type to MultiMesh mesh type
+		var mm_unit_type: String
+		match unit_type:
+			"scout": mm_unit_type = "drone" if faction_id == 1 else "grunt"
+			"soldier": mm_unit_type = "soldier"
+			"tank": mm_unit_type = "heavy"
+			"harvester": mm_unit_type = "worker"
+			_: mm_unit_type = "soldier"
+		_multimesh_renderer.register_unit(unit_id, mm_faction_id, mm_unit_type, mesh.global_transform)
+		# Hide individual mesh - MultiMesh handles rendering
+		mesh.visible = false
+
+	# Register with LOD system for visual detail management
+	if _lod_system != null:
+		_lod_system.register_unit(unit_id, spawn_pos)
+
+	# Register with performance tier system for AI update throttling
+	if _performance_tier_system != null and _use_performance_tiers:
+		_performance_tier_system.register_unit(unit_id)
+
 	return unit
 
 
@@ -10704,6 +12753,86 @@ func _create_health_bar(faction_id: int) -> Node3D:
 	return bar
 
 
+## Update visibility culling for all units based on camera frustum.
+## Units outside the camera view are hidden to save rendering cost.
+## This is a HUGE performance win - CSG nodes are expensive to render.
+func _update_visibility_culling() -> void:
+	if not _use_frustum_culling:
+		return
+
+	# Calculate camera frustum bounds in world space (top-down RTS view)
+	var cam_pos := camera.global_position
+	var cam_target := _camera_look_at
+	var cam_height := cam_pos.y
+
+	# Estimate visible area based on camera height and FOV
+	# Higher camera = larger visible area
+	var fov_factor := tan(deg_to_rad(camera.fov / 2.0))
+	var visible_width := cam_height * fov_factor * 2.2  # Wider for RTS
+	var visible_depth := cam_height * fov_factor * 1.4  # Less deep due to angle
+
+	# Add margin for smooth culling at edges
+	var margin := _frustum_margin
+	var min_x := cam_target.x - visible_width - margin
+	var max_x := cam_target.x + visible_width + margin
+	var min_z := cam_target.z - visible_depth - margin
+	var max_z := cam_target.z + visible_depth + margin
+
+	# Cache bounds for other systems
+	_frustum_bounds = [min_x, max_x, min_z, max_z]
+
+	# Reset stats
+	_visible_unit_count = 0
+	_culled_unit_count = 0
+
+	# Update visibility for each unit
+	for unit in _units:
+		if unit.is_dead:
+			continue
+
+		var mesh: Node3D = unit.mesh
+		if not is_instance_valid(mesh):
+			continue
+
+		var pos := mesh.global_position
+		var dist_to_camera := pos.distance_to(cam_target)
+
+		# Check if unit is within frustum bounds AND within max render distance
+		var in_frustum := pos.x >= min_x and pos.x <= max_x and pos.z >= min_z and pos.z <= max_z
+		var in_range := dist_to_camera <= _max_render_distance
+		var should_be_visible := in_frustum and in_range
+
+		# Update mesh visibility
+		if mesh.visible != should_be_visible:
+			mesh.visible = should_be_visible
+
+			# Also hide/show health bar
+			if unit.has("health_bar") and is_instance_valid(unit.health_bar):
+				unit.health_bar.visible = should_be_visible
+
+			# Also hide/show selection ring
+			if unit.has("selection_ring") and is_instance_valid(unit.selection_ring):
+				unit.selection_ring.visible = should_be_visible and unit.get("is_selected", false)
+
+			# Also hide/show stance indicator
+			if unit.has("stance_indicator") and is_instance_valid(unit.stance_indicator):
+				unit.stance_indicator.visible = should_be_visible
+
+		# Track stats
+		if should_be_visible:
+			_visible_unit_count += 1
+		else:
+			_culled_unit_count += 1
+
+
+## Check if a world position is within the current camera frustum.
+func _is_position_visible(pos: Vector3) -> bool:
+	if not _use_frustum_culling:
+		return true
+	return pos.x >= _frustum_bounds[0] and pos.x <= _frustum_bounds[1] and \
+		   pos.z >= _frustum_bounds[2] and pos.z <= _frustum_bounds[3]
+
+
 func _update_units(delta: float) -> void:
 	for unit in _units:
 		if unit.is_dead:
@@ -10713,8 +12842,15 @@ func _update_units(delta: float) -> void:
 		if not is_instance_valid(mesh):
 			continue
 
-		# Update attack cooldown
+		# Update attack cooldown (always - combat critical)
 		unit.attack_cooldown = maxf(0.0, unit.attack_cooldown - delta)
+
+		# Check performance tier - skip AI updates for units far from combat
+		var unit_id: int = unit.get("id", 0)
+		var skip_ai_update := false
+		if _performance_tier_system != null and _use_performance_tiers and unit_id > 0:
+			if not _performance_tier_system.should_update(unit_id):
+				skip_ai_update = true
 
 		# Initialize navigation fields if missing
 		if not unit.has("nav_waypoint"):
@@ -10722,6 +12858,12 @@ func _update_units(delta: float) -> void:
 			unit["nav_stuck_time"] = 0.0
 			unit["nav_last_pos"] = mesh.position
 			unit["nav_recalc_timer"] = 0.0
+
+		# Skip AI decision-making if performance tier says so (movement still happens)
+		if skip_ai_update:
+			# Still do movement towards existing target, just don't recalculate
+			_update_unit_movement_only(unit, delta)
+			continue
 
 		# Check for retreat behavior (low health or outnumbered)
 		var retreat_pos: Variant = _check_retreat_needed(unit)
@@ -10864,7 +13006,7 @@ func _update_units(delta: float) -> void:
 			var move_speed: float = _get_unit_speed(unit)  # Apply veterancy speed bonus
 
 			# Apply Overclock speed boost for OptiForge units (faction 2)
-			var unit_id: int = unit.get("id", 0)
+			# Note: unit_id already declared at start of loop for performance tier check
 			if unit_id > 0 and unit.faction_id == 2 and _overclock_unit != null:
 				if _overclock_unit.is_overclocked(unit_id):
 					move_speed *= _overclock_unit.get_speed_multiplier(unit_id)
@@ -10888,10 +13030,80 @@ func _update_units(delta: float) -> void:
 		var dist_moved: float = mesh.position.distance_to(prev_pos)
 		unit["is_moving"] = dist_moved > 0.1  # Moving if traveled more than 0.1 units
 
+		# Update MultiMesh transform for batched rendering
+		if _multimesh_renderer != null and _use_multimesh_rendering and dist_moved > 0.01:
+			var unit_id_mm: int = unit.get("id", 0)
+			if unit_id_mm > 0:
+				_multimesh_renderer.mark_dirty(unit_id_mm, mesh.global_transform)
+
+		# Update LOD system with new unit position
+		if _lod_system != null and dist_moved > 0.01:
+			var unit_id_lod: int = unit.get("id", 0)
+			if unit_id_lod > 0:
+				_lod_system.update_unit_position(unit_id_lod, mesh.position)
+
 		# Update health bar position
 		if is_instance_valid(unit.health_bar):
 			unit.health_bar.position = mesh.position + Vector3(0, 2.5, 0)
 			unit.health_bar.rotation.y = camera.rotation.y if camera else 0
+
+
+## Simplified unit movement update for performance-throttled units.
+## Moves unit towards existing target without recalculating AI decisions.
+func _update_unit_movement_only(unit: Dictionary, delta: float) -> void:
+	var mesh: Node3D = unit.mesh
+	if not is_instance_valid(mesh):
+		return
+
+	var prev_pos: Vector3 = mesh.position
+	var move_target: Vector3 = unit.target_pos
+
+	# If unit has an existing enemy target, move towards it
+	if unit.target_enemy != null and _is_valid_target(unit.target_enemy):
+		var enemy_pos: Vector3 = unit.target_enemy.mesh.position
+		var dist := mesh.position.distance_to(enemy_pos)
+		var unit_range: float = unit.get("attack_range", ATTACK_RANGE)
+		if dist > unit_range:
+			move_target = enemy_pos
+
+	# Move toward target
+	var to_target := move_target - mesh.position
+	to_target.y = 0
+	var siege_locked: bool = unit.get("siege_locked", false)
+
+	if to_target.length() > 1.0 and not siege_locked:
+		var dir := to_target.normalized()
+		var move_speed: float = _get_unit_speed(unit)
+		var new_pos: Vector3 = mesh.position + dir * move_speed * delta
+
+		# Check building collision
+		if _city_renderer != null:
+			new_pos = _city_renderer.get_collision_adjusted_position(mesh.position, new_pos, 1.5)
+
+		mesh.position = new_pos
+
+	mesh.position.y = 1.0
+
+	# Track movement
+	var dist_moved: float = mesh.position.distance_to(prev_pos)
+	unit["is_moving"] = dist_moved > 0.1
+
+	# Update MultiMesh transform
+	if _multimesh_renderer != null and _use_multimesh_rendering and dist_moved > 0.01:
+		var unit_id: int = unit.get("id", 0)
+		if unit_id > 0:
+			_multimesh_renderer.mark_dirty(unit_id, mesh.global_transform)
+
+	# Update LOD position
+	if _lod_system != null and dist_moved > 0.01:
+		var unit_id_lod: int = unit.get("id", 0)
+		if unit_id_lod > 0:
+			_lod_system.update_unit_position(unit_id_lod, mesh.position)
+
+	# Update health bar position
+	if is_instance_valid(unit.health_bar):
+		unit.health_bar.position = mesh.position + Vector3(0, 2.5, 0)
+		unit.health_bar.rotation.y = camera.rotation.y if camera else 0
 
 
 ## Heal units near their faction's factory.
@@ -11143,6 +13355,360 @@ func _update_factory_health_bars() -> void:
 				fill.position.x = -5.0 * (1.0 - health_pct)
 
 
+## ========== FACTORY CONSTRUCTION SYSTEM ==========
+
+## Handle construction started event
+func _on_construction_started(site_id: int, position: Vector3, faction_id: int) -> void:
+	# Create construction site visual (scaffold)
+	var visual := Node3D.new()
+	visual.name = "ConstructionSite_%d" % site_id
+	visual.position = position
+
+	# Create scaffold frame
+	var scaffold := _create_construction_scaffold(faction_id)
+	visual.add_child(scaffold)
+
+	# Create progress bar
+	var progress_bar := _create_construction_progress_bar(faction_id)
+	progress_bar.position.y = 15.0
+	visual.add_child(progress_bar)
+
+	_effects_container.add_child(visual)
+	_construction_sites[site_id] = visual
+
+	print("Construction started: site %d at %s for faction %d" % [site_id, position, faction_id])
+
+
+## Create scaffold visual for construction site
+func _create_construction_scaffold(faction_id: int) -> Node3D:
+	var scaffold := Node3D.new()
+	scaffold.name = "Scaffold"
+
+	var faction_color: Color = FACTION_COLORS.get(faction_id, Color.WHITE)
+
+	# Create wireframe cube representing the factory being built
+	var frame_mat := StandardMaterial3D.new()
+	frame_mat.albedo_color = faction_color * 0.7
+	frame_mat.emission_enabled = true
+	frame_mat.emission = faction_color
+	frame_mat.emission_energy_multiplier = 1.0
+	frame_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	frame_mat.albedo_color.a = 0.6
+
+	# Create vertical beams at corners
+	for corner in [Vector3(-25, 0, -25), Vector3(25, 0, -25), Vector3(-25, 0, 25), Vector3(25, 0, 25)]:
+		var beam := CSGBox3D.new()
+		beam.size = Vector3(2, 50, 2)
+		beam.position = corner + Vector3(0, 25, 0)
+		beam.material = frame_mat
+		scaffold.add_child(beam)
+
+	# Create horizontal beams at top
+	for i in range(4):
+		var beam := CSGBox3D.new()
+		if i < 2:
+			beam.size = Vector3(50, 2, 2)
+			beam.position = Vector3(0, 50, -25 if i == 0 else 25)
+		else:
+			beam.size = Vector3(2, 2, 50)
+			beam.position = Vector3(-25 if i == 2 else 25, 50, 0)
+		beam.material = frame_mat
+		scaffold.add_child(beam)
+
+	return scaffold
+
+
+## Create progress bar for construction site
+func _create_construction_progress_bar(faction_id: int) -> Node3D:
+	var bar := Node3D.new()
+	bar.name = "ProgressBar"
+
+	var faction_color: Color = FACTION_COLORS.get(faction_id, Color.WHITE)
+
+	# Background
+	var bg := CSGBox3D.new()
+	bg.size = Vector3(12, 1, 0.5)
+	var bg_mat := StandardMaterial3D.new()
+	bg_mat.albedo_color = Color(0.1, 0.1, 0.1, 0.8)
+	bg.material = bg_mat
+	bar.add_child(bg)
+
+	# Fill
+	var fill := CSGBox3D.new()
+	fill.name = "Fill"
+	fill.size = Vector3(12, 1, 0.5)
+	fill.position.z = 0.1
+	var fill_mat := StandardMaterial3D.new()
+	fill_mat.albedo_color = faction_color
+	fill_mat.emission_enabled = true
+	fill_mat.emission = faction_color
+	fill_mat.emission_energy_multiplier = 2.0
+	fill.material = fill_mat
+	fill.scale.x = 0.0  # Start empty
+	bar.add_child(fill)
+
+	return bar
+
+
+## Handle construction progress update
+func _on_construction_progress(site_id: int, progress: float) -> void:
+	if not _construction_sites.has(site_id):
+		return
+
+	var visual: Node3D = _construction_sites[site_id]
+	var progress_bar: Node3D = visual.get_node_or_null("ProgressBar")
+	if progress_bar:
+		var fill: CSGBox3D = progress_bar.get_node_or_null("Fill")
+		if fill:
+			fill.scale.x = progress
+			fill.position.x = -6.0 * (1.0 - progress)
+
+
+## Handle construction completed
+func _on_construction_completed(site_id: int, factory_id: int) -> void:
+	if not _construction_sites.has(site_id):
+		return
+
+	var visual: Node3D = _construction_sites[site_id]
+	var position: Vector3 = visual.position
+
+	# Get site data
+	var site: FactoryConstruction.ConstructionSite = _factory_construction.get_site(site_id)
+	var faction_id: int = site.faction_id if site else _player_faction
+
+	# Remove construction visual
+	visual.queue_free()
+	_construction_sites.erase(site_id)
+
+	# Create the actual factory
+	_create_new_factory(position, faction_id)
+
+	print("Construction completed: factory at %s for faction %d" % [position, faction_id])
+
+
+## Create a new factory at position
+func _create_new_factory(position: Vector3, faction_id: int) -> void:
+	# Create factory node
+	var factory_node := CSGBox3D.new()
+	factory_node.name = "Factory_%d_%d" % [faction_id, _factories.size()]
+	factory_node.size = Vector3(50, 50, 50)
+	factory_node.position = position
+
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = FACTION_COLORS.get(faction_id, Color.WHITE)
+	mat.emission_enabled = true
+	mat.emission = FACTION_COLORS.get(faction_id, Color.WHITE) * 0.3
+	mat.emission_energy_multiplier = 1.0
+	factory_node.material = mat
+
+	add_child(factory_node)
+
+	# Create health bar
+	var health_bar := _create_factory_health_bar(faction_id)
+	_health_bar_container.add_child(health_bar)
+
+	# Assign new factory ID (use negative to distinguish from original 4)
+	var new_factory_id: int = -(faction_id * 100 + _factories.size())
+
+	_factories[new_factory_id] = {
+		"node": factory_node,
+		"health_bar": health_bar,
+		"name_label": null,
+		"health": FACTORY_HEALTH,
+		"max_health": FACTORY_HEALTH,
+		"faction_id": faction_id,
+		"is_destroyed": false,
+		"position": position,
+		"power_plant_id": -1,
+		"district_id": -1,
+		"is_powered": true,
+		"power_multiplier": 1.0,
+		"is_constructed": true  # Mark as player-built
+	}
+
+	# Register with mass production if OptiForge
+	if faction_id == 2 and _mass_production != null:
+		_mass_production.register_factory(new_factory_id)
+
+
+## Start factory placement mode (called from UI)
+func start_factory_placement() -> void:
+	if _construction_placement_mode:
+		return
+
+	# Check if player can afford
+	var can_afford := ResourceManager.get_current_ree(_player_faction) >= FactoryConstruction.FACTORY_REE_COST
+	if not can_afford:
+		_show_notification("Not enough REE! Need %.0f" % FactoryConstruction.FACTORY_REE_COST)
+		return
+
+	# Check factory limit
+	var validation := _factory_construction.is_valid_placement(Vector3.ZERO, _player_faction, _player_faction)
+	if "Maximum factories" in validation.reason:
+		_show_notification(validation.reason)
+		return
+
+	_construction_placement_mode = true
+
+	# Create preview ghost
+	_construction_preview = CSGBox3D.new()
+	_construction_preview.size = Vector3(50, 50, 50)
+	var preview_mat := StandardMaterial3D.new()
+	preview_mat.albedo_color = Color(0.2, 1.0, 0.3, 0.4)  # Green transparent
+	preview_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_construction_preview.material = preview_mat
+	add_child(_construction_preview)
+
+
+## Cancel factory placement mode
+func cancel_factory_placement() -> void:
+	_construction_placement_mode = false
+	if _construction_preview:
+		_construction_preview.queue_free()
+		_construction_preview = null
+
+
+## Start factory construction directly at ruins location (right-click shortcut)
+func _start_construction_at_ruins(ruins_pos: Vector3) -> void:
+	if _factory_construction == null:
+		_show_notification("Construction system not available")
+		return
+
+	# Check REE resources
+	if not ResourceManager or ResourceManager.get_ree(_player_faction) < FactoryConstruction.FACTORY_REE_COST:
+		_show_notification("Need %d REE to build factory" % int(FactoryConstruction.FACTORY_REE_COST))
+		return
+
+	# Find district at ruins position
+	var district_id: int = _get_district_at_position(ruins_pos)
+	var district_owner: int = 0
+	if district_id >= 0 and district_id < _districts.size():
+		district_owner = _districts[district_id].owner
+
+	# Validate placement
+	var validation := _factory_construction.is_valid_placement(ruins_pos, _player_faction, district_owner)
+	if not validation.valid:
+		_show_notification(validation.reason)
+		return
+
+	# Consume resources
+	if not ResourceManager.consume_ree(_player_faction, FactoryConstruction.FACTORY_REE_COST, "factory_construction"):
+		_show_notification("Not enough REE!")
+		return
+
+	# Find a builder from selected units to assign
+	var builder_id: int = 0
+	for unit in _selected_units:
+		if unit.get("unit_class", "") == "builder" or unit.get("is_harvester", false):
+			builder_id = unit.get("id", 0)
+			break
+
+	# Start construction
+	var site_id := _factory_construction.start_construction(ruins_pos, _player_faction, district_id, builder_id)
+
+	# Remove the ruins marker since we're building there
+	for i in range(_building_ruins.size() - 1, -1, -1):
+		if _building_ruins[i].position.distance_to(ruins_pos) < RUINS_PLACEMENT_RADIUS:
+			if _building_ruins[i].has("marker"):
+				var marker = _building_ruins[i].marker
+				if is_instance_valid(marker):
+					marker.queue_free()
+			_building_ruins.remove_at(i)
+			break
+
+	_show_notification("Factory construction started at ruins!")
+	_play_ui_sound("notification")
+
+	# Visual feedback
+	_spawn_command_text(ruins_pos, "BUILDING", Color(1.0, 0.8, 0.2))
+
+
+## Update factory placement preview
+func _update_factory_placement(mouse_pos: Vector2) -> void:
+	if not _construction_placement_mode or not _construction_preview:
+		return
+
+	# Raycast to get world position
+	var camera: Camera3D = get_viewport().get_camera_3d()
+	if not camera:
+		return
+
+	var from: Vector3 = camera.project_ray_origin(mouse_pos)
+	var to: Vector3 = from + camera.project_ray_normal(mouse_pos) * 2000
+
+	# Simple ground plane intersection (y = 0)
+	var t: float = -from.y / (to.y - from.y) if abs(to.y - from.y) > 0.001 else 0
+	var world_pos := from + (to - from) * t
+	world_pos.y = 0
+
+	_construction_preview.position = world_pos
+
+	# Check validity
+	var district_id: int = _get_district_at_position(world_pos)
+	var district_owner: int = 0
+	if district_id >= 0 and district_id < _districts.size():
+		district_owner = _districts[district_id].owner
+
+	var validation := _factory_construction.is_valid_placement(world_pos, _player_faction, district_owner)
+
+	# Update preview color
+	var mat: StandardMaterial3D = _construction_preview.material
+	if validation.valid:
+		mat.albedo_color = Color(0.2, 1.0, 0.3, 0.4)  # Green = valid
+	else:
+		mat.albedo_color = Color(1.0, 0.2, 0.2, 0.4)  # Red = invalid
+
+
+## Confirm factory placement
+func _confirm_factory_placement() -> void:
+	if not _construction_placement_mode or not _construction_preview:
+		return
+
+	var world_pos: Vector3 = _construction_preview.position
+
+	# Check validity one more time
+	var district_id: int = _get_district_at_position(world_pos)
+	var district_owner: int = 0
+	if district_id >= 0 and district_id < _districts.size():
+		district_owner = _districts[district_id].owner
+
+	var validation := _factory_construction.is_valid_placement(world_pos, _player_faction, district_owner)
+
+	if not validation.valid:
+		_show_notification(validation.reason)
+		return
+
+	# Consume resources
+	if not ResourceManager.consume_ree(_player_faction, FactoryConstruction.FACTORY_REE_COST, "factory_construction"):
+		_show_notification("Not enough REE!")
+		return
+
+	# Start construction (find a builder or start immediately for now)
+	var site_id := _factory_construction.start_construction(world_pos, _player_faction, district_id, 0)
+
+	# For now, mark construction as having a virtual builder
+	# TODO: Require actual builder units
+
+	cancel_factory_placement()
+	_show_notification("Factory construction started!")
+
+
+## Update factory construction progress
+func _update_factory_construction(delta: float) -> void:
+	if _factory_construction == null:
+		return
+
+	# Update construction and get completed sites
+	var completed_sites: Array[int] = _factory_construction.update(delta)
+
+	# Finalize completed constructions
+	for site_id in completed_sites:
+		var site: FactoryConstruction.ConstructionSite = _factory_construction.get_site(site_id)
+		if site:
+			# Assign a dummy factory_id (real one created in callback)
+			_factory_construction.finalize_construction(site_id, -1)
+
+
 func _fire_projectile(from_unit: Dictionary, to_unit: Dictionary) -> void:
 	var start_pos: Vector3 = from_unit.mesh.position + Vector3(0, 1.5, 0)
 	var end_pos: Vector3 = to_unit.mesh.position + Vector3(0, 1.0, 0)
@@ -11183,15 +13749,25 @@ func _fire_projectile(from_unit: Dictionary, to_unit: Dictionary) -> void:
 	var faction_color: Color = FACTION_COLORS.get(faction_id, Color.WHITE)
 	var secondary_color: Color = proj_style.get("secondary_color", faction_color)
 
-	# Scale projectile size based on damage and faction style
-	var base_size: float = 0.2 + (unit_damage / 100.0) * 0.3
-	var proj_size: float = base_size * float(proj_style.get("size_mult", 1.0))
-	var proj_speed: float = PROJECTILE_SPEED * float(proj_style.get("speed_mult", 1.0))
-	var emission_mult: float = proj_style.get("emission_mult", 2.0)
+	# Get unit type modifiers for projectile appearance
+	var unit_type: String = from_unit.get("unit_type", "soldier")
+	var type_mods: Dictionary = UNIT_TYPE_PROJECTILE_MODS.get(unit_type, {})
 
-	# Create projectile visual based on faction shape
+	# Scale projectile size based on damage, faction style, and unit type
+	var base_size: float = 0.2 + (unit_damage / 100.0) * 0.3
+	var faction_size_mult: float = float(proj_style.get("size_mult", 1.0))
+	var type_size_mult: float = float(type_mods.get("size_mult", 1.0))
+	var proj_size: float = base_size * faction_size_mult * type_size_mult
+
+	var faction_speed_mult: float = float(proj_style.get("speed_mult", 1.0))
+	var type_speed_mult: float = float(type_mods.get("speed_mult", 1.0))
+	var proj_speed: float = PROJECTILE_SPEED * faction_speed_mult * type_speed_mult
+
+	var emission_mult: float = proj_style.get("emission_mult", 2.0) * type_mods.get("glow_intensity", 1.0)
+
+	# Create projectile visual - unit type can override faction shape
 	var proj_mesh: CSGShape3D
-	var shape: String = proj_style.get("shape", "sphere")
+	var shape: String = type_mods.get("shape_override", proj_style.get("shape", "sphere"))
 	match shape:
 		"cylinder":
 			# Elongated laser beam shape
@@ -11326,6 +13902,11 @@ func _cleanup_projectile_trail(proj: Dictionary) -> void:
 		proj.trail.queue_free()
 
 
+## PERFORMANCE OPTIMIZED: Uses distance_squared_to() to avoid sqrt() calls.
+## Pre-computed squared thresholds: 1.5² = 2.25, 12² = 144
+const UNIT_HIT_DIST_SQ := 2.25  # 1.5 * 1.5
+const FACTORY_HIT_DIST_SQ := 144.0  # 12 * 12
+
 func _update_projectiles(delta: float) -> void:
 	var to_remove: Array = []
 
@@ -11345,14 +13926,20 @@ func _update_projectiles(delta: float) -> void:
 		# Move projectile
 		proj.mesh.position += proj.direction * proj.speed * delta
 
+		# Visibility culling for projectiles - hide if off-screen
+		if _use_frustum_culling:
+			var proj_visible := _is_position_visible(proj.mesh.position)
+			if proj.mesh.visible != proj_visible:
+				proj.mesh.visible = proj_visible
+
 		# Update trail visual
 		_update_projectile_trail(proj)
 
-		# Check collision with unit target
+		# Check collision with unit target (OPTIMIZED: squared distance)
 		if proj.target != null and not proj.target.is_dead:
 			if is_instance_valid(proj.target.mesh):
-				var dist: float = proj.mesh.position.distance_to(proj.target.mesh.position)
-				if dist < 1.5:
+				var dist_sq: float = proj.mesh.position.distance_squared_to(proj.target.mesh.position)
+				if dist_sq < UNIT_HIT_DIST_SQ:
 					# Look up attacker for XP awards
 					var attacker: Dictionary = _get_unit_by_id(proj.get("from_unit_id", -1))
 					_damage_unit(proj.target, proj.damage, proj.from_faction, attacker)
@@ -11372,13 +13959,13 @@ func _update_projectiles(delta: float) -> void:
 					to_remove.append(proj)
 					continue
 
-		# Check collision with factory target
+		# Check collision with factory target (OPTIMIZED: squared distance)
 		if proj.has("target_factory") and proj.target_factory != null:
 			var factory: Dictionary = proj.target_factory
 			if not factory.is_destroyed:
 				var factory_pos: Vector3 = factory.position + Vector3(0, 5, 0)
-				var dist: float = proj.mesh.position.distance_to(factory_pos)
-				if dist < 12.0:  # Factory is bigger
+				var dist_sq: float = proj.mesh.position.distance_squared_to(factory_pos)
+				if dist_sq < FACTORY_HIT_DIST_SQ:
 					_damage_factory(factory, proj.damage, proj.from_faction)
 					# Spawn heavy impact effect for factory hits
 					_spawn_impact_effect(proj.mesh.position, proj.from_faction, true)
@@ -11399,9 +13986,40 @@ func _update_projectiles(delta: float) -> void:
 				_cleanup_projectile_trail(proj)
 				proj.mesh.queue_free()
 				to_remove.append(proj)
+				continue
 
-	for proj in to_remove:
-		_projectiles.erase(proj)
+		# Check collision with voxel terrain (destructible terrain)
+		if _voxel_system != null:
+			var voxel_pos := Vector3i(
+				int(floor(proj.mesh.position.x)),
+				0,
+				int(floor(proj.mesh.position.z))
+			)
+			if _voxel_system.is_valid_position(voxel_pos):
+				# Check if terrain is traversable (destroyed voxels are traversable)
+				if not _voxel_system.is_traversable(voxel_pos):
+					# Apply damage to voxel terrain
+					_voxel_system.damage_voxel(voxel_pos, int(proj.damage * 0.3), "projectile")
+					# Spawn impact effect
+					_spawn_impact_effect(proj.mesh.position, proj.from_faction, false)
+					_play_hit_sound(proj.mesh.position)
+					_cleanup_projectile_trail(proj)
+					proj.mesh.queue_free()
+					to_remove.append(proj)
+
+	# PERFORMANCE: Batch remove using index tracking to avoid hashing circular dictionary references
+	if not to_remove.is_empty():
+		var remove_indices: Array[int] = []
+		for proj in to_remove:
+			var idx := _projectiles.find(proj)
+			if idx != -1:
+				remove_indices.append(idx)
+		# Sort descending to remove from end first (preserves earlier indices)
+		remove_indices.sort()
+		remove_indices.reverse()
+		for idx in remove_indices:
+			_projectiles.remove_at(idx)
+
 
 
 func _damage_factory(factory: Dictionary, damage: float, from_faction: int) -> void:
@@ -11508,6 +14126,10 @@ func _damage_unit(unit: Dictionary, damage: float, from_faction: int, attacker: 
 		if _audio_manager:
 			var severity := clampf(reduced_damage / 50.0, 0.2, 2.0)  # Scale based on damage
 			_audio_manager.report_combat_event(severity)
+		# Also report to battle intensity tracker for more detailed tracking
+		if _battle_intensity_tracker != null:
+			_battle_intensity_tracker.report_damage(reduced_damage)
+			_battle_intensity_tracker.report_combat_event(0.5)
 
 	# Award XP for damage dealt (only to non-empty attacker)
 	if not attacker.is_empty() and reduced_damage > 0:
@@ -11582,6 +14204,12 @@ func _damage_unit(unit: Dictionary, damage: float, from_faction: int, attacker: 
 			_spawn_explosion(unit.mesh.position, unit.faction_id)
 			_play_explosion_sound(unit.mesh.position, 0.8)
 
+		# Report death to battle intensity tracker
+		if _battle_intensity_tracker != null:
+			var is_enemy: bool = (unit.faction_id != _player_faction)
+			_battle_intensity_tracker.report_death(is_enemy)
+			_battle_intensity_tracker.report_explosion()
+
 		# Add to kill feed
 		var killer_type: String = attacker.get("unit_type", "unit") if not attacker.is_empty() else "unit"
 		var victim_type: String = unit.get("unit_type", "unit")
@@ -11626,6 +14254,13 @@ func _apply_splash_damage(impact_pos: Vector3, base_damage: float, splash_radius
 	# Spawn splash visual effect if we hit anything
 	if splash_targets.size() > 0:
 		_spawn_splash_effect(impact_pos, splash_radius, from_faction)
+
+	# Apply splash damage to voxel terrain
+	if _voxel_system != null and splash_radius >= 3.0:
+		var center := Vector3i(int(floor(impact_pos.x)), 0, int(floor(impact_pos.z)))
+		var voxel_damage := int(base_damage * 0.4)  # 40% of base damage to terrain
+		var area_radius := int(ceil(splash_radius / 2.0))  # Smaller radius for voxels
+		_voxel_system.damage_area(center, area_radius, voxel_damage, "splash")
 
 
 ## Spawn a visual effect for splash damage area.
@@ -11728,10 +14363,22 @@ func _cleanup_dead_units() -> void:
 	for unit in _units:
 		if unit.is_dead:
 			# Unregister from faction mechanics
+			var unit_id: int = unit.get("id", 0)
 			if _faction_mechanics != null:
-				var unit_id: int = unit.get("id", 0)
 				if unit_id > 0:
 					_faction_mechanics.unregister_unit(unit_id)
+
+			# Unregister from MultiMesh rendering system
+			if _multimesh_renderer != null and _use_multimesh_rendering and unit_id > 0:
+				_multimesh_renderer.queue_dead_unit(unit_id)
+
+			# Unregister from LOD system
+			if _lod_system != null and unit_id > 0:
+				_lod_system.unregister_unit(unit_id)
+
+			# Unregister from performance tier system
+			if _performance_tier_system != null and _use_performance_tiers and unit_id > 0:
+				_performance_tier_system.unregister_unit(unit_id)
 
 			if is_instance_valid(unit.mesh):
 				unit.mesh.queue_free()
@@ -12330,6 +14977,85 @@ func _spawn_factory_production_effect(factory_pos: Vector3, faction_id: int) -> 
 	)
 
 
+## Update unit ejection animations.
+func _update_unit_ejections(delta: float) -> void:
+	if _unit_ejection_animation != null:
+		_unit_ejection_animation.update(delta)
+
+
+## Callback when a unit ejection animation completes.
+func _on_unit_ejection_completed(ejection_id: int, unit_node: Node3D) -> void:
+	if not _pending_ejections.has(ejection_id):
+		return
+
+	var unit: Dictionary = _pending_ejections[ejection_id]
+	_pending_ejections.erase(ejection_id)
+
+	# Ensure unit mesh is at final position
+	if unit.has("mesh") and is_instance_valid(unit.mesh):
+		# Unit is now ready - spawn a small completion effect
+		var faction_id: int = unit.get("faction_id", _player_faction)
+		var faction_color: Color = FACTION_COLORS.get(faction_id, Color.WHITE)
+		_spawn_ejection_complete_effect(unit.mesh.position, faction_color)
+
+
+## Spawn a small effect when unit ejection completes.
+func _spawn_ejection_complete_effect(position: Vector3, color: Color) -> void:
+	var particles := GPUParticles3D.new()
+	particles.position = position + Vector3(0, 1, 0)
+	particles.emitting = true
+	particles.one_shot = true
+	particles.explosiveness = 1.0
+	particles.amount = 16
+	particles.lifetime = 0.5
+	particles.visibility_aabb = AABB(Vector3(-5, -5, -5), Vector3(10, 10, 10))
+
+	var mat := ParticleProcessMaterial.new()
+	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_RING
+	mat.emission_ring_radius = 1.0
+	mat.emission_ring_inner_radius = 0.5
+	mat.emission_ring_height = 0.1
+	mat.emission_ring_axis = Vector3(0, 1, 0)
+
+	mat.direction = Vector3(0, 1, 0)
+	mat.spread = 30.0
+	mat.initial_velocity_min = 1.0
+	mat.initial_velocity_max = 3.0
+	mat.gravity = Vector3(0, 0.5, 0)
+	mat.scale_min = 0.1
+	mat.scale_max = 0.2
+
+	var gradient := Gradient.new()
+	gradient.set_color(0, color.lightened(0.3))
+	gradient.set_color(1, Color(color.r, color.g, color.b, 0.0))
+	var gradient_tex := GradientTexture1D.new()
+	gradient_tex.gradient = gradient
+	mat.color_ramp = gradient_tex
+
+	particles.process_material = mat
+
+	var mesh := SphereMesh.new()
+	mesh.radius = 0.05
+	mesh.height = 0.1
+	var mesh_mat := StandardMaterial3D.new()
+	mesh_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mesh_mat.emission_enabled = true
+	mesh_mat.emission = color
+	mesh_mat.emission_energy_multiplier = 2.0
+	mesh_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mesh.material = mesh_mat
+	particles.draw_pass_1 = mesh
+
+	_effects_container.add_child(particles)
+
+	# Auto-cleanup
+	var timer := get_tree().create_timer(particles.lifetime + 0.2)
+	timer.timeout.connect(func():
+		if is_instance_valid(particles):
+			particles.queue_free()
+	)
+
+
 ## Spawn ability activation effect.
 func _spawn_ability_effect(position: Vector3, faction_id: int, ability_type: String) -> void:
 	var faction_color: Color = FACTION_COLORS.get(faction_id, Color.WHITE)
@@ -12760,7 +15486,7 @@ func _update_explosions(delta: float) -> void:
 		# Core shrinks and brightens then fades
 		if exp.has("core") and is_instance_valid(exp.core):
 			var core_progress: float = minf(progress * 2.0, 1.0)  # Core fades faster
-			exp.core.radius = 0.3 * (1.0 - core_progress)
+			exp.core.radius = maxf(0.01, 0.3 * (1.0 - core_progress))  # Minimum radius to avoid CSG error
 			if exp.has("core_material") and exp.core_material:
 				exp.core_material.albedo_color.a = 1.0 - core_progress
 				exp.core_material.emission_energy_multiplier = 8.0 * (1.0 - core_progress * 0.5)
@@ -12771,6 +15497,29 @@ func _update_explosions(delta: float) -> void:
 
 func _find_nearest_enemy(unit: Dictionary) -> Variant:
 	return _find_best_target(unit, INF)
+
+
+## Callback for PerformanceTierSystem - returns distance to nearest enemy for a unit_id.
+## Used to determine combat proximity for AI update throttling.
+func _get_nearest_enemy_distance_for_tier(unit_id: int) -> float:
+	# Find unit by ID
+	for unit in _units:
+		if unit.get("id", -1) == unit_id:
+			if unit.is_dead or not is_instance_valid(unit.mesh):
+				return INF
+			var unit_pos: Vector3 = unit.mesh.position
+			var nearest_dist: float = INF
+			# Find nearest enemy
+			for other in _units:
+				if other.is_dead or other.faction_id == unit.faction_id:
+					continue
+				if not is_instance_valid(other.mesh):
+					continue
+				var dist := unit_pos.distance_to(other.mesh.position)
+				if dist < nearest_dist:
+					nearest_dist = dist
+			return nearest_dist
+	return INF
 
 
 ## Find the best target for a unit using priority scoring.
@@ -13280,19 +16029,30 @@ func _update_harvesters(delta: float) -> void:
 					unit["target_building_id"] = -1
 
 
-## Find nearest damaged building that can be salvaged.
+## Find nearest building that can be salvaged (including intact buildings).
+## Harvesters actively demolish buildings for REE when no wrecks available.
 func _find_nearest_salvage_building(unit: Dictionary) -> Dictionary:
 	if not is_instance_valid(unit.mesh) or _city_renderer == null:
 		return {}
 
 	var unit_pos: Vector3 = unit.mesh.position
 	var result: Dictionary = {}
-	var nearest_dist: float = 100.0  # Max search distance for buildings
+	var nearest_dist: float = 250.0  # Increased search distance for buildings
 
-	# Get list of damaged buildings from city renderer
+	# First try damaged buildings (priority)
 	if _city_renderer.has_method("get_damaged_buildings"):
 		var damaged_buildings: Array = _city_renderer.get_damaged_buildings()
 		for building in damaged_buildings:
+			var building_pos: Vector3 = building.get("position", Vector3.ZERO)
+			var dist: float = unit_pos.distance_to(building_pos)
+			if dist < nearest_dist:
+				nearest_dist = dist
+				result = building
+
+	# If no damaged buildings found nearby, seek intact buildings
+	if result.is_empty() and _city_renderer.has_method("get_all_salvageable_buildings"):
+		var all_buildings: Array = _city_renderer.get_all_salvageable_buildings()
+		for building in all_buildings:
 			var building_pos: Vector3 = building.get("position", Vector3.ZERO)
 			var dist: float = unit_pos.distance_to(building_pos)
 			if dist < nearest_dist:
@@ -13550,12 +16310,24 @@ func _ai_make_spawn_decision(faction_id: int, is_defending: bool = false) -> voi
 		else:
 			return  # Not enough
 
-	# Consume resources and spawn
+	# Consume resources and spawn using faction-specific templates
 	if ResourceManager.consume_ree(faction_id, cost, "ai_production"):
 		_track_stat(faction_id, "ree_spent", cost)
-		_spawn_unit(faction_id, spawn_pos, unit_type)
+		var new_unit: Dictionary = _spawn_faction_unit(faction_id, spawn_pos, unit_type)
 		# Spawn factory production effect for AI factions
 		_spawn_factory_production_effect(factory_pos, faction_id)
+
+		# Start unit ejection animation for AI units
+		if _unit_ejection_animation != null and new_unit.has("mesh") and is_instance_valid(new_unit.mesh):
+			var ejection_id: int = _unit_ejection_animation.start_ejection(
+				new_unit.mesh,
+				factory_pos,
+				spawn_pos,
+				faction_id,
+				_effects_container
+			)
+			if ejection_id >= 0:
+				_pending_ejections[ejection_id] = new_unit
 
 
 ## AI orders an attack on the nearest enemy.
@@ -13716,12 +16488,20 @@ func _show_game_over(is_victory: bool) -> void:
 
 
 func _handle_left_click(screen_pos: Vector2) -> void:
-	# Deselect all first
+	# Deselect all first (units and factory)
 	_deselect_all_units()
+	_deselect_factory()
 
-	# Simple selection - find unit near click
+	# Check for factory click first
 	var world_pos := _screen_to_world(screen_pos)
 	if world_pos != Vector3.ZERO:
+		# Check if clicked on player's factory
+		var factory_pos: Vector3 = FACTORY_POSITIONS.get(_player_faction, Vector3.ZERO)
+		if factory_pos.distance_to(world_pos) < 35.0:  # Factory click radius (factory is 50x50)
+			_select_factory()
+			return
+
+		# Simple selection - find unit near click
 		for unit in _units:
 			if unit.is_dead or unit.faction_id != _player_faction:
 				continue
@@ -13736,20 +16516,37 @@ func _handle_right_click(screen_pos: Vector2) -> void:
 		return
 
 	var world_pos := _screen_to_world(screen_pos)
-	if world_pos != Vector3.ZERO:
-		# Play move command sound
-		_play_move_command_sound()
+	if world_pos == Vector3.ZERO:
+		return
 
-		# Spawn move indicator
-		_spawn_move_indicator(world_pos)
+	# Check if clicking on ruins while having a builder selected
+	var has_builder := false
+	for unit in _selected_units:
+		if unit.get("unit_class", "") == "builder" or unit.get("is_harvester", false):
+			has_builder = true
+			break
 
-		# Visual command feedback
-		_spawn_command_text(world_pos, "MOVE", Color(0.3, 1.0, 0.3))
-		_flash_units_on_command(_selected_units, Color(0.5, 1.0, 0.5))
-		_spawn_command_lines(_selected_units, world_pos, Color(0.3, 1.0, 0.3, 0.4))
+	if has_builder:
+		var ruins := _find_ruins_at(world_pos)
+		if not ruins.is_empty():
+			# Start factory construction at ruins location
+			_start_construction_at_ruins(ruins.position)
+			return
 
-		# Move units in formation
-		_move_units_in_formation(world_pos, false)
+	# Normal move command
+	# Play move command sound
+	_play_move_command_sound()
+
+	# Spawn move indicator
+	_spawn_move_indicator(world_pos)
+
+	# Visual command feedback
+	_spawn_command_text(world_pos, "MOVE", Color(0.3, 1.0, 0.3))
+	_flash_units_on_command(_selected_units, Color(0.5, 1.0, 0.5))
+	_spawn_command_lines(_selected_units, world_pos, Color(0.3, 1.0, 0.3, 0.4))
+
+	# Move units in formation
+	_move_units_in_formation(world_pos, false)
 
 
 ## Deselect all units and clear selection indicators.
@@ -13759,6 +16556,82 @@ func _deselect_all_units() -> void:
 			unit.is_selected = false
 			_remove_selection_indicator(unit)
 	_selected_units.clear()
+
+
+## Select the player's factory.
+func _select_factory() -> void:
+	_factory_selected = true
+	_play_ui_sound("select")
+	print("Factory selected - use production panel or Shift+1-4 to queue units")
+
+	# Show the factory production panel
+	if _factory_production_panel:
+		_factory_production_panel.visible = true
+		_update_factory_production_panel()
+
+	# Add selection ring around factory
+	_add_factory_selection_ring()
+
+
+## Deselect the factory.
+func _deselect_factory() -> void:
+	if not _factory_selected:
+		return
+
+	_factory_selected = false
+
+	# Hide the factory production panel
+	if _factory_production_panel:
+		_factory_production_panel.visible = false
+
+	# Remove factory selection ring
+	_remove_factory_selection_ring()
+
+
+## Add selection ring around factory.
+func _add_factory_selection_ring() -> void:
+	if not _factories.has(_player_faction):
+		return
+
+	var factory: Dictionary = _factories[_player_faction]
+	if factory.has("selection_ring") and is_instance_valid(factory.selection_ring):
+		return
+
+	var ring := CSGTorus3D.new()
+	ring.name = "FactorySelectionRing"
+	ring.inner_radius = 18.0
+	ring.outer_radius = 20.0
+	ring.ring_sides = 32
+	ring.sides = 12
+
+	var mat := StandardMaterial3D.new()
+	var faction_color: Color = FACTION_COLORS.get(_player_faction, Color.WHITE)
+	mat.albedo_color = Color(faction_color.r, faction_color.g, faction_color.b, 0.7)
+	mat.emission_enabled = true
+	mat.emission = faction_color
+	mat.emission_energy_multiplier = 2.0
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ring.material = mat
+
+	var factory_pos: Vector3 = FACTORY_POSITIONS.get(_player_faction, Vector3.ZERO)
+	ring.position = factory_pos
+	ring.position.y = 0.3
+	ring.rotation_degrees.x = 90
+
+	_effects_container.add_child(ring)
+	factory["selection_ring"] = ring
+
+
+## Remove factory selection ring.
+func _remove_factory_selection_ring() -> void:
+	if not _factories.has(_player_faction):
+		return
+
+	var factory: Dictionary = _factories[_player_faction]
+	if factory.has("selection_ring") and is_instance_valid(factory.selection_ring):
+		factory.selection_ring.queue_free()
+		factory.selection_ring = null
 
 
 ## Select a single unit and add selection indicator.
@@ -14134,6 +17007,29 @@ func _save_control_group(group_num: int) -> void:
 
 	_control_groups[group_num] = group
 	print("Saved %d units to group %d" % [group.size(), group_num])
+
+	# Play sound
+	if _should_play_sound():
+		_play_ui_sound("click")
+
+
+## Check if a control group has alive units.
+func _has_control_group(group_num: int) -> bool:
+	if not _control_groups.has(group_num):
+		return false
+
+	var group: Array = _control_groups[group_num]
+	if group.is_empty():
+		return false
+
+	# Check if any units in the group are still alive
+	for unit in group:
+		if unit is Dictionary and not unit.get("is_dead", false):
+			return true
+		elif unit is Node and is_instance_valid(unit) and not unit.get_meta("is_dead", false):
+			return true
+
+	return false
 
 
 ## Recall units from a control group.
@@ -14581,10 +17477,18 @@ func _is_unit_alive_by_id(unit_id: int) -> bool:
 	return false
 
 
-## Building destroyed callback - spawns REE pickup
+## Building destroyed callback - spawns REE pickup and tracks ruins
 func _on_building_destroyed(building_id: int, position: Vector3, ree_amount: float) -> void:
 	# Spawn collectible REE drop
 	_spawn_ree_drop(position, ree_amount)
+
+	# Track ruins for factory placement
+	_building_ruins.append({
+		"position": position,
+		"age": 0.0
+	})
+	# Create ruins visual indicator (rubble marker)
+	_create_ruins_marker(position)
 
 	# Play explosion sound
 	_play_explosion_sound(position, 0.6)
@@ -14593,38 +17497,213 @@ func _on_building_destroyed(building_id: int, position: Vector3, ree_amount: flo
 	print("Building %d destroyed at %s, dropped %.1f REE" % [building_id, position, ree_amount])
 
 
+## Create visual marker for building ruins (construction site indicator)
+func _create_ruins_marker(position: Vector3) -> void:
+	var marker := Node3D.new()
+	marker.name = "RuinsMarker"
+	marker.position = position
+
+	# Create rubble base plate (flat disk)
+	var plate := MeshInstance3D.new()
+	var cylinder_mesh := CylinderMesh.new()
+	cylinder_mesh.top_radius = 8.0
+	cylinder_mesh.bottom_radius = 8.0
+	cylinder_mesh.height = 0.3
+	plate.mesh = cylinder_mesh
+	plate.position = Vector3(0, 0.15, 0)
+
+	var plate_mat := StandardMaterial3D.new()
+	plate_mat.albedo_color = Color(0.3, 0.25, 0.2, 0.6)
+	plate_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	plate.material_override = plate_mat
+	marker.add_child(plate)
+
+	# Create construction icon (diamond outline) to indicate buildable area
+	var icon := MeshInstance3D.new()
+	var prism := PrismMesh.new()
+	prism.size = Vector3(2.0, 3.0, 2.0)
+	icon.mesh = prism
+	icon.position = Vector3(0, 3.0, 0)
+
+	var icon_mat := StandardMaterial3D.new()
+	icon_mat.albedo_color = Color(0.3, 1.0, 0.5, 0.4)
+	icon_mat.emission_enabled = true
+	icon_mat.emission = Color(0.3, 0.8, 0.4)
+	icon_mat.emission_energy_multiplier = 1.0
+	icon_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	icon_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	icon.material_override = icon_mat
+	marker.add_child(icon)
+
+	# Store marker reference in ruins data
+	for ruins in _building_ruins:
+		if ruins.position.distance_to(position) < 1.0:
+			ruins["marker"] = marker
+			break
+
+	_effects_container.add_child(marker)
+
+	# Animate icon rotation and bobbing (bind to marker so tween dies with marker)
+	var tween := marker.create_tween().set_loops()
+	tween.tween_property(icon, "rotation:y", TAU, 4.0).from(0.0)
+
+
+## Update ruins aging and cleanup
+func _update_ruins(delta: float) -> void:
+	var to_remove: Array[int] = []
+
+	for i in range(_building_ruins.size()):
+		_building_ruins[i].age += delta
+		if _building_ruins[i].age >= RUINS_MAX_AGE:
+			to_remove.append(i)
+			# Remove marker
+			if _building_ruins[i].has("marker"):
+				var marker = _building_ruins[i].marker
+				if is_instance_valid(marker):
+					marker.queue_free()
+
+	# Remove old ruins (reverse order to preserve indices)
+	for i in range(to_remove.size() - 1, -1, -1):
+		_building_ruins.remove_at(to_remove[i])
+
+
+## Find ruins near a world position
+func _find_ruins_at(world_pos: Vector3) -> Dictionary:
+	var nearest_dist := INF
+	var nearest: Dictionary = {}
+
+	for ruins in _building_ruins:
+		var dist: float = world_pos.distance_to(ruins.position)
+		if dist < RUINS_PLACEMENT_RADIUS and dist < nearest_dist:
+			nearest_dist = dist
+			nearest = ruins
+
+	return nearest
+
+
 ## Building damaged callback
 func _on_building_damaged(building_id: int, health_percent: float) -> void:
 	# Could add visual/audio feedback here
 	pass
 
 
-## Spawn collectible REE drop
+## Voxel destroyed callback - spawns REE pickup from terrain destruction
+func _on_voxel_destroyed(position: Vector3i) -> void:
+	# Base REE value for destroyed voxel
+	var base_ree := 10.0
+
+	# Convert to world position for spawning
+	var world_pos := Vector3(position.x, 0, position.z)
+
+	# Spawn REE drop
+	_spawn_ree_drop(world_pos, base_ree)
+
+	# Play destruction sound
+	_play_explosion_sound(world_pos, 0.3)
+
+	# Screen shake for nearby destruction
+	var camera_dist := camera.global_position.distance_to(world_pos)
+	if camera_dist < 100.0:
+		_trigger_screen_shake(0.5 * (1.0 - camera_dist / 100.0))
+
+
+## Get navigation path from start to end position using dynamic navmesh.
+func get_navigation_path(start: Vector3, end: Vector3) -> PackedVector3Array:
+	if _navmesh_manager != null:
+		return _navmesh_manager.find_path(start, end)
+	# Fallback: direct path
+	return PackedVector3Array([start, end])
+
+
+## Get closest navigable point on navmesh.
+func get_closest_navigable_point(pos: Vector3) -> Vector3:
+	if _navmesh_manager != null:
+		return _navmesh_manager.get_closest_point(pos)
+	return pos
+
+
+## Check if position is on the navigation mesh.
+func is_position_navigable(pos: Vector3) -> bool:
+	if _navmesh_manager != null:
+		return _navmesh_manager.is_point_on_navmesh(pos)
+	return true  # Assume navigable if no navmesh
+
+
+## Get navigation map RID for NavigationAgent3D nodes.
+func get_navigation_map() -> RID:
+	if _navmesh_manager != null:
+		return _navmesh_manager.get_navigation_map()
+	return RID()
+
+
+## Spawn collectible REE drop as glowing crystal
 func _spawn_ree_drop(position: Vector3, amount: float) -> void:
-	# Create floating REE orb
-	var ree_mesh := CSGSphere3D.new()
-	ree_mesh.radius = 0.8 + amount * 0.02  # Size based on amount
-	ree_mesh.position = position + Vector3(0, 3, 0)
-	ree_mesh.name = "REEDrop"
+	# Create crystal container
+	var crystal_container := Node3D.new()
+	crystal_container.position = position + Vector3(0, 3, 0)
+	crystal_container.name = "REECrystal"
 
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.2, 1.0, 0.4, 0.9)  # Green for REE
-	mat.emission_enabled = true
-	mat.emission = Color(0.2, 1.0, 0.4)
-	mat.emission_energy_multiplier = 3.0
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	ree_mesh.material = mat
+	# Determine crystal size based on amount (small/medium/large)
+	var size_scale: float = 1.0
+	if amount >= 100:
+		size_scale = 1.5  # Large crystal
+	elif amount >= 50:
+		size_scale = 1.2  # Medium crystal
 
-	_effects_container.add_child(ree_mesh)
+	# Create crystal shape (hexagonal prism with pointed ends)
+	var crystal_mesh := _create_crystal_mesh(size_scale)
+	crystal_container.add_child(crystal_mesh)
+
+	# Add inner glow core
+	var core := CSGSphere3D.new()
+	core.radius = 0.3 * size_scale
+	var core_mat := StandardMaterial3D.new()
+	core_mat.albedo_color = Color(0.8, 1.0, 0.8, 0.8)
+	core_mat.emission_enabled = true
+	core_mat.emission = Color(0.5, 1.0, 0.6)
+	core_mat.emission_energy_multiplier = 5.0
+	core_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	core.material = core_mat
+	crystal_container.add_child(core)
+
+	_effects_container.add_child(crystal_container)
 
 	# Track this pickup
 	_ree_pickups.append({
-		"mesh": ree_mesh,
+		"mesh": crystal_container,
+		"crystal": crystal_mesh,
+		"core": core,
 		"position": position + Vector3(0, 3, 0),
 		"amount": amount,
 		"lifetime": REE_PICKUP_LIFETIME,
-		"bob_offset": randf() * TAU  # Random starting phase for bobbing
+		"bob_offset": randf() * TAU,  # Random starting phase for bobbing
+		"rotation_speed": randf_range(0.5, 1.5)  # Random rotation speed
 	})
+
+
+## Create crystal mesh geometry
+func _create_crystal_mesh(scale: float) -> MeshInstance3D:
+	var mesh_instance := MeshInstance3D.new()
+
+	# Use prism shape for crystal
+	var prism := PrismMesh.new()
+	prism.size = Vector3(0.6, 1.8, 0.6) * scale
+	mesh_instance.mesh = prism
+
+	# Crystal material - translucent green with emission
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.15, 0.9, 0.35, 0.85)  # Translucent green
+	mat.emission_enabled = true
+	mat.emission = Color(0.2, 1.0, 0.4)
+	mat.emission_energy_multiplier = 2.5
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED  # See both sides
+	mat.rim_enabled = true
+	mat.rim = 0.5
+	mat.rim_tint = 0.3
+	mesh_instance.material_override = mat
+
+	return mesh_instance
 
 
 ## Update REE pickups - check for collection and animate
@@ -14648,10 +17727,23 @@ func _update_ree_pickups(delta: float) -> void:
 		pickup.bob_offset += delta * 2.0
 		pickup.mesh.position.y = pickup.position.y + sin(pickup.bob_offset) * 0.5
 
-		# Pulsing glow
-		var mat: StandardMaterial3D = pickup.mesh.material
-		if mat:
-			mat.emission_energy_multiplier = 2.0 + sin(pickup.bob_offset * 2.0) * 1.0
+		# Crystal rotation
+		var rot_speed: float = pickup.get("rotation_speed", 1.0)
+		pickup.mesh.rotation.y += delta * rot_speed
+
+		# Pulsing glow for crystal
+		var crystal: MeshInstance3D = pickup.get("crystal")
+		if crystal and is_instance_valid(crystal):
+			var mat: StandardMaterial3D = crystal.material_override
+			if mat:
+				mat.emission_energy_multiplier = 2.0 + sin(pickup.bob_offset * 2.0) * 1.0
+
+		# Pulsing core
+		var core: CSGSphere3D = pickup.get("core")
+		if core and is_instance_valid(core):
+			var core_mat: StandardMaterial3D = core.material
+			if core_mat:
+				core_mat.emission_energy_multiplier = 4.0 + sin(pickup.bob_offset * 3.0) * 2.0
 
 		# Flash when about to expire
 		if pickup.lifetime < 5.0:
@@ -14715,6 +17807,31 @@ func _spawn_ree_collect_effect(position: Vector3, amount: float) -> void:
 	_play_hit_sound(position)
 
 
+## Show a temporary notification message on screen
+func _show_notification(message: String, duration: float = 2.0) -> void:
+	var label := Label.new()
+	label.text = message
+	label.add_theme_font_size_override("font_size", 24)
+	label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.3))
+	label.add_theme_color_override("font_outline_color", Color.BLACK)
+	label.add_theme_constant_override("outline_size", 4)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.anchors_preset = Control.PRESET_CENTER_TOP
+	label.position.y = 100
+
+	$UI.add_child(label)
+
+	# Animate fade out
+	var tween := create_tween()
+	tween.tween_interval(duration * 0.7)
+	tween.tween_property(label, "modulate:a", 0.0, duration * 0.3)
+	tween.tween_callback(func():
+		if is_instance_valid(label):
+			label.queue_free()
+	)
+
+
 func _update_debug_info() -> void:
 	if debug_label == null:
 		return
@@ -14759,6 +17876,17 @@ func _update_debug_info() -> void:
 	info += "─────────────────────────────────\n"
 	info += "Blue:%d Red:%d Green:%d Yellow:%d\n" % [faction_counts[1], faction_counts[2], faction_counts[3], faction_counts[4]]
 	info += "Targeting:%d InRange:%d K:%d D:%d\n" % [units_with_target, units_in_range, _player_kills, _player_deaths]
+
+	# Memory tracking - array sizes
+	var effects_count := _effects_container.get_child_count() if _effects_container else 0
+	var unit_container_count := _unit_container.get_child_count() if _unit_container else 0
+	info += "Exp:%d REE:%d Ruins:%d Pings:%d Effects:%d\n" % [
+		_explosions.size(), _ree_pickups.size(), _building_ruins.size(),
+		_active_pings.size(), effects_count
+	]
+	info += "UnitNodes:%d KillFeed:%d CmdLines:%d\n" % [
+		unit_container_count, _kill_feed_entries.size(), _command_lines.size()
+	]
 
 	# Building destruction stats
 	if _city_renderer != null:
@@ -15628,6 +18756,169 @@ func _move_units_in_formation(target: Vector3, attack_move: bool = false) -> voi
 
 
 # =============================================================================
+# DRAG FORMATION SYSTEM
+# =============================================================================
+
+## Update drag formation preview while dragging
+func _update_drag_formation_preview() -> void:
+	_clear_drag_formation_preview()
+
+	if _selected_units.is_empty():
+		return
+
+	# Get world positions for start and end of drag
+	var drag_start_world := _drag_form_world_start
+	var drag_end_world := _screen_to_world(_drag_form_end)
+
+	# Calculate formation direction (perpendicular to drag)
+	var drag_vector := drag_end_world - drag_start_world
+	if drag_vector.length_squared() < 1.0:
+		return
+
+	var drag_length := drag_vector.length()
+	var drag_dir := drag_vector.normalized()
+
+	# Formation direction is perpendicular to drag
+	var formation_dir := Vector3(-drag_dir.z, 0, drag_dir.x)
+
+	# Calculate unit positions along the drag line
+	var unit_count := _selected_units.size()
+	var spacing := minf(drag_length / maxf(unit_count - 1, 1), FORMATION_SPACING * 1.5)
+
+	# Create preview dots/lines
+	var faction_color: Color = FACTION_COLORS.get(_player_faction, Color.WHITE)
+
+	for i in range(unit_count):
+		var t := float(i) / maxf(unit_count - 1, 1)
+		var pos := drag_start_world.lerp(drag_end_world, t)
+		pos.y = 0.5  # Slightly above ground
+
+		# Create small sphere marker
+		var marker := MeshInstance3D.new()
+		var sphere := SphereMesh.new()
+		sphere.radius = 1.0
+		sphere.height = 2.0
+		marker.mesh = sphere
+
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = faction_color
+		mat.albedo_color.a = 0.5
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.emission_enabled = true
+		mat.emission = faction_color
+		mat.emission_energy_multiplier = 2.0
+		marker.material_override = mat
+
+		marker.position = pos
+		_effects_container.add_child(marker)
+		_drag_form_preview_lines.append(marker)
+
+	# Add direction arrow at center
+	var center := drag_start_world.lerp(drag_end_world, 0.5)
+	var arrow := _create_direction_arrow(center, formation_dir, faction_color)
+	_effects_container.add_child(arrow)
+	_drag_form_preview_lines.append(arrow)
+
+
+## Create a direction arrow mesh
+func _create_direction_arrow(position: Vector3, direction: Vector3, color: Color) -> MeshInstance3D:
+	var arrow := MeshInstance3D.new()
+
+	# Use a simple prism as arrow
+	var prism := PrismMesh.new()
+	prism.size = Vector3(2.0, 6.0, 2.0)
+	arrow.mesh = prism
+
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = color
+	mat.albedo_color.a = 0.7
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.emission_enabled = true
+	mat.emission = color
+	mat.emission_energy_multiplier = 1.5
+	arrow.material_override = mat
+
+	arrow.position = position + Vector3(0, 3, 0)
+	# Rotate to point in direction
+	arrow.rotation.y = atan2(direction.x, direction.z)
+	arrow.rotation.x = -PI / 2  # Lay flat pointing forward
+
+	return arrow
+
+
+## Clear drag formation preview
+func _clear_drag_formation_preview() -> void:
+	for marker in _drag_form_preview_lines:
+		if is_instance_valid(marker):
+			marker.queue_free()
+	_drag_form_preview_lines.clear()
+
+
+## Execute drag formation move
+func _execute_drag_formation() -> void:
+	if _selected_units.is_empty():
+		return
+
+	# Get world positions
+	var drag_start_world := _drag_form_world_start
+	var drag_end_world := _screen_to_world(_drag_form_end)
+
+	var drag_vector := drag_end_world - drag_start_world
+	var drag_length := drag_vector.length()
+	var drag_dir := drag_vector.normalized() if drag_length > 0.1 else Vector3(0, 0, -1)
+
+	# Formation facing direction is perpendicular to drag
+	var formation_dir := Vector3(-drag_dir.z, 0, drag_dir.x)
+
+	# Calculate positions along the drag line
+	var unit_count := _selected_units.size()
+	var positions: Array[Vector3] = []
+
+	for i in range(unit_count):
+		var t := float(i) / maxf(unit_count - 1, 1)
+		var pos := drag_start_world.lerp(drag_end_world, t)
+		pos.y = 0
+		positions.append(pos)
+
+	# Sort units by distance to their target position (greedy assignment)
+	var assigned: Array[bool] = []
+	assigned.resize(unit_count)
+	for i in range(unit_count):
+		assigned[i] = false
+
+	# Assign each position to nearest unassigned unit
+	for pos in positions:
+		var best_unit_idx := -1
+		var best_dist := INF
+
+		for i in range(_selected_units.size()):
+			if assigned[i]:
+				continue
+			var unit: Dictionary = _selected_units[i]
+			if unit.is_dead or not is_instance_valid(unit.mesh):
+				assigned[i] = true
+				continue
+
+			var dist: float = unit.mesh.position.distance_to(pos)
+			if dist < best_dist:
+				best_dist = dist
+				best_unit_idx = i
+
+		if best_unit_idx >= 0:
+			var unit: Dictionary = _selected_units[best_unit_idx]
+			unit.target_pos = pos
+			unit.attack_move = false
+			unit.is_patrolling = false
+			unit.is_guarding = false
+			unit.command_queue = []
+			assigned[best_unit_idx] = true
+
+	# Play move sound
+	if _audio_manager:
+		_audio_manager.play_ui_sound("select")
+
+
+# =============================================================================
 # COMMAND QUEUE SYSTEM
 # =============================================================================
 
@@ -16162,16 +19453,13 @@ func _start_aura_pulse(aura: CSGTorus3D, mat: StandardMaterial3D, color: Color) 
 	if not is_instance_valid(aura):
 		return
 
-	# Create looping pulse animation
-	var tween := create_tween()
+	# Create looping pulse animation (bind to aura so tween dies with aura)
+	var tween := aura.create_tween()
 	tween.set_loops()
 
 	# Pulse the emission energy
 	tween.tween_property(mat, "emission_energy_multiplier", 3.5, 0.5).set_ease(Tween.EASE_IN_OUT)
 	tween.tween_property(mat, "emission_energy_multiplier", 1.5, 0.5).set_ease(Tween.EASE_IN_OUT)
-
-	# Store tween reference for cleanup
-	aura.set_meta("pulse_tween", tween)
 
 
 ## Spawn level-up visual effect

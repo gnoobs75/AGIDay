@@ -163,6 +163,10 @@ func _load_default_templates() -> int:
 	defaults.append(_create_aether_wispfire_template())
 	defaults.append(_create_aether_driftpod_template())
 	defaults.append(_create_aether_shadow_relay_template())
+	defaults.append(_create_aether_gale_swarm_template())
+	defaults.append(_create_aether_quillback_template())
+	defaults.append(_create_aether_thornclad_template())
+	defaults.append(_create_aether_ghosteye_template())
 
 	# OptiForge Legion units
 	defaults.append(_create_optiforge_forge_walker_template())
@@ -183,6 +187,12 @@ func _load_default_templates() -> int:
 	defaults.append(_create_dynapods_vaultpounder_template())
 	defaults.append(_create_dynapods_titanquad_template())
 	defaults.append(_create_dynapods_skybound_template())
+	defaults.append(_create_dynapods_quadripper_template())
+	defaults.append(_create_dynapods_leapscav_template())
+	defaults.append(_create_dynapods_boundlifter_template())
+	defaults.append(_create_dynapods_shadowstride_template())
+	defaults.append(_create_dynapods_pulsepod_template())
+	defaults.append(_create_dynapods_stridetrans_template())
 
 	# LogiBots Colossus units
 	defaults.append(_create_logibots_bulkripper_template())
@@ -191,6 +201,10 @@ func _load_default_templates() -> int:
 	defaults.append(_create_logibots_siegehaul_template())
 	defaults.append(_create_logibots_titanclad_template())
 	defaults.append(_create_logibots_gridbreaker_template())
+	defaults.append(_create_logibots_forge_stomper_template())
+	defaults.append(_create_logibots_logi_eye_template())
+	defaults.append(_create_logibots_colossus_cart_template())
+	defaults.append(_create_logibots_payload_slinger_template())
 
 	# Human Resistance units
 	defaults.append(_create_human_soldier_template())
@@ -200,6 +214,11 @@ func _load_default_templates() -> int:
 	defaults.append(_create_human_m1_abrams_template())
 	defaults.append(_create_human_stryker_template())
 	defaults.append(_create_human_dronegun_raven_template())
+	defaults.append(_create_human_mk19_grenadier_template())
+	defaults.append(_create_human_leonidas_pods_template())
+	defaults.append(_create_human_cyber_rigs_template())
+	defaults.append(_create_human_m939_scrapjacks_template())
+	defaults.append(_create_human_d7_bulldozer_template())
 
 	# Builder units for each faction
 	defaults.append(_create_aether_nano_welder_template())
@@ -887,6 +906,130 @@ func _create_dynapods_skybound_template() -> UnitTemplate:
 	template.production_cost = {"ree": 450, "energy": 350, "time": 11.0}
 	template.abilities = ["jet_boost", "aerial_pounce", "terrain_adapt"]
 	template.tags = ["medium", "aerial", "multi-legged", "fast"]
+	template._validate()
+	return template
+
+
+# =============================================================================
+# DYNAPODS VANGUARD - HARVESTER UNITS
+# =============================================================================
+
+## Create Dynapods Quadripper template - quad-legged resource gathering mech.
+func _create_dynapods_quadripper_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "dynapods_quadripper"
+	template.faction_key = "dynapods_vanguard"
+	template.unit_type = "quadripper"
+	template.display_name = "Quadripper"
+	template.description = "Agile four-legged harvester that tears through terrain to extract REE."
+	template.base_stats = {
+		"max_health": 120.0,
+		"health_regen": 0.5,
+		"max_speed": 8.0,
+		"acceleration": 45.0,
+		"turn_rate": 5.0,
+		"armor": 0.15,
+		"base_damage": 12.0,
+		"attack_speed": 0.8,
+		"attack_range": 6.0,
+		"vision_range": 20.0,
+		"gather_rate": 2.5,
+		"cargo_capacity": 100.0,
+		"terrain_bonus": 0.3,
+		"mass": 140.0,
+		"friction": 0.5
+	}
+	template.rendering = {
+		"mesh_path": "res://assets/units/dynapods/quadripper.tscn",
+		"material_path": "",
+		"scale": Vector3(0.85, 0.85, 0.85),
+		"use_multimesh": false,
+		"lod_distances": [30.0, 60.0, 100.0]
+	}
+	template.production_cost = {"ree": 150, "energy": 80, "time": 8.0}
+	template.abilities = ["terrain_adapt", "dig_boost"]
+	template.tags = ["medium", "gatherer", "multi-legged", "industrial"]
+	template._validate()
+	return template
+
+
+## Create Dynapods Leapscav template - terrain-conquering scavenger.
+func _create_dynapods_leapscav_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "dynapods_leapscav"
+	template.faction_key = "dynapods_vanguard"
+	template.unit_type = "leapscav"
+	template.display_name = "Leapscav"
+	template.description = "Agile scavenger that leaps across terrain to reach distant REE deposits."
+	template.base_stats = {
+		"max_health": 70.0,
+		"health_regen": 1.0,
+		"max_speed": 12.0,
+		"acceleration": 65.0,
+		"turn_rate": 6.5,
+		"armor": 0.05,
+		"base_damage": 6.0,
+		"attack_speed": 1.0,
+		"attack_range": 5.0,
+		"vision_range": 30.0,
+		"gather_rate": 1.8,
+		"cargo_capacity": 60.0,
+		"leap_range": 15.0,
+		"leap_cooldown": 4.0,
+		"mass": 60.0,
+		"friction": 0.3
+	}
+	template.rendering = {
+		"mesh_path": "res://assets/units/dynapods/leapscav.tscn",
+		"material_path": "",
+		"scale": Vector3(0.7, 0.7, 0.7),
+		"use_multimesh": true,
+		"lod_distances": [25.0, 50.0, 90.0]
+	}
+	template.production_cost = {"ree": 100, "energy": 50, "time": 5.0}
+	template.abilities = ["terrain_adapt", "scavenger_leap"]
+	template.tags = ["light", "gatherer", "multi-legged", "fast", "scout"]
+	template._validate()
+	return template
+
+
+## Create Dynapods Boundlifter template - gap-vaulting transport quad.
+func _create_dynapods_boundlifter_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "dynapods_boundlifter"
+	template.faction_key = "dynapods_vanguard"
+	template.unit_type = "boundlifter"
+	template.display_name = "Boundlifter"
+	template.description = "Heavy transport quad that can vault over obstacles and carry massive REE loads."
+	template.base_stats = {
+		"max_health": 200.0,
+		"health_regen": 0.0,
+		"max_speed": 6.0,
+		"acceleration": 30.0,
+		"turn_rate": 3.5,
+		"armor": 0.25,
+		"base_damage": 8.0,
+		"attack_speed": 0.5,
+		"attack_range": 8.0,
+		"vision_range": 18.0,
+		"gather_rate": 1.5,
+		"cargo_capacity": 250.0,
+		"vault_range": 12.0,
+		"vault_cooldown": 8.0,
+		"transport_capacity": 4,
+		"mass": 300.0,
+		"friction": 0.6
+	}
+	template.rendering = {
+		"mesh_path": "res://assets/units/dynapods/boundlifter.tscn",
+		"material_path": "",
+		"scale": Vector3(1.1, 1.1, 1.1),
+		"use_multimesh": false,
+		"lod_distances": [40.0, 80.0, 140.0]
+	}
+	template.production_cost = {"ree": 250, "energy": 150, "time": 12.0}
+	template.abilities = ["terrain_adapt", "gap_vault", "bulk_transport"]
+	template.tags = ["heavy", "gatherer", "transport", "multi-legged", "industrial"]
 	template._validate()
 	return template
 
@@ -1712,5 +1855,584 @@ func _create_human_dronegun_raven_template() -> UnitTemplate:
 	template.production_cost = {"ree": 0, "energy": 0, "time": 0.0}  # AI spawned
 	template.abilities = ["swarm_jam", "disable_drones", "electronic_warfare"]
 	template.tags = ["light", "support", "human", "electronic_warfare", "anti_swarm"]
+	template._validate()
+	return template
+
+
+## Create Human MK19 Grenadiers template - suppression fire specialists.
+func _create_human_mk19_grenadier_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "human_mk19_grenadier"
+	template.faction_key = "human_remnant"
+	template.unit_type = "mk19_grenadier"
+	template.display_name = "MK19 Grenadiers"
+	template.description = "Two-man crew with automatic grenade launcher for area suppression."
+	template.base_stats = {
+		"max_health": 70.0,
+		"health_regen": 0.3,
+		"max_speed": 4.0,
+		"acceleration": 25.0,
+		"turn_rate": 3.5,
+		"armor": 0.15,
+		"base_damage": 25.0,
+		"attack_speed": 0.8,
+		"attack_range": 35.0,
+		"vision_range": 25.0,
+		"splash_radius": 6.0,
+		"suppression_value": 0.6,
+		"grenade_velocity": 75.0,
+		"ammo_capacity": 48
+	}
+	template.production_cost = {"ree": 0, "energy": 0, "time": 0.0}  # AI spawned
+	template.abilities = ["suppressive_fire", "area_denial", "setup_deploy"]
+	template.tags = ["light", "infantry", "human", "support", "aoe", "suppression"]
+	template._validate()
+	return template
+
+
+## Create Human Leonidas Pods template - High Power Microwave truck.
+func _create_human_leonidas_pods_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "human_leonidas_pods"
+	template.faction_key = "human_remnant"
+	template.unit_type = "leonidas_pods"
+	template.display_name = "Leonidas Pods"
+	template.description = "Mobile HPM (High Power Microwave) truck that fries electronics in a cone."
+	template.base_stats = {
+		"max_health": 140.0,
+		"health_regen": 0.0,
+		"max_speed": 6.5,
+		"acceleration": 20.0,
+		"turn_rate": 2.5,
+		"armor": 0.2,
+		"base_damage": 35.0,
+		"attack_speed": 0.3,
+		"attack_range": 20.0,
+		"vision_range": 25.0,
+		"hpm_cone_angle": 60.0,
+		"hpm_range": 25.0,
+		"disable_duration": 2.5,
+		"overcharge_damage_bonus": 1.5,
+		"mass": 180.0
+	}
+	template.production_cost = {"ree": 0, "energy": 0, "time": 0.0}  # AI spawned
+	template.abilities = ["hpm_burst", "overcharge", "emp_field"]
+	template.tags = ["medium", "vehicle", "human", "electronic_warfare", "anti_robot"]
+	template._validate()
+	return template
+
+
+## Create Human Cyber Rigs template - Power grid hackers.
+func _create_human_cyber_rigs_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "human_cyber_rigs"
+	template.faction_key = "human_remnant"
+	template.unit_type = "cyber_rigs"
+	template.display_name = "Cyber Rigs"
+	template.description = "Mobile hacking station that infiltrates robot power grids and causes blackouts."
+	template.base_stats = {
+		"max_health": 90.0,
+		"health_regen": 0.0,
+		"max_speed": 5.0,
+		"acceleration": 25.0,
+		"turn_rate": 3.0,
+		"armor": 0.15,
+		"base_damage": 0.0,
+		"attack_speed": 0.0,
+		"attack_range": 0.0,
+		"vision_range": 40.0,
+		"hack_range": 50.0,
+		"hack_duration": 3.0,
+		"blackout_duration": 15.0,
+		"hack_cooldown": 30.0,
+		"signal_boost_range": 30.0
+	}
+	template.production_cost = {"ree": 0, "energy": 0, "time": 0.0}  # AI spawned
+	template.abilities = ["grid_hack", "signal_boost", "blackout_attack", "power_drain"]
+	template.tags = ["medium", "support", "human", "hacking", "power_disruption"]
+	template._validate()
+	return template
+
+
+## Create Human M939 Scrapjacks template - Resource scavengers.
+func _create_human_m939_scrapjacks_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "human_m939_scrapjacks"
+	template.faction_key = "human_remnant"
+	template.unit_type = "m939_scrapjacks"
+	template.display_name = "M939 Scrapjacks"
+	template.description = "Armored cargo truck with crane for salvaging robot wreckage."
+	template.base_stats = {
+		"max_health": 160.0,
+		"health_regen": 0.0,
+		"max_speed": 7.0,
+		"acceleration": 18.0,
+		"turn_rate": 2.5,
+		"armor": 0.25,
+		"base_damage": 8.0,
+		"attack_speed": 0.5,
+		"attack_range": 12.0,
+		"vision_range": 20.0,
+		"harvest_rate": 3.0,
+		"carry_capacity": 200.0,
+		"salvage_bonus": 0.25,
+		"mass": 200.0
+	}
+	template.production_cost = {"ree": 0, "energy": 0, "time": 0.0}  # AI spawned
+	template.abilities = ["salvage", "haul", "field_repair"]
+	template.tags = ["medium", "harvester", "human", "support", "resource"]
+	template._validate()
+	return template
+
+
+## Create Human D7 Bulldozers template - Armored resource gatherers.
+func _create_human_d7_bulldozer_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "human_d7_bulldozer"
+	template.faction_key = "human_remnant"
+	template.unit_type = "d7_bulldozer"
+	template.display_name = "D7 Bulldozer"
+	template.description = "Heavily armored bulldozer that clears debris and gathers resources."
+	template.base_stats = {
+		"max_health": 280.0,
+		"health_regen": 0.0,
+		"max_speed": 4.0,
+		"acceleration": 12.0,
+		"turn_rate": 1.5,
+		"armor": 0.45,
+		"base_damage": 40.0,
+		"attack_speed": 0.3,
+		"attack_range": 4.0,
+		"vision_range": 15.0,
+		"harvest_rate": 5.0,
+		"carry_capacity": 350.0,
+		"push_force": 50.0,
+		"debris_clear_rate": 2.0,
+		"mass": 400.0
+	}
+	template.rendering = {
+		"mesh_path": "res://assets/units/human/d7_bulldozer.tscn",
+		"material_path": "",
+		"scale": Vector3(1.0, 1.0, 1.0),
+		"use_multimesh": false,
+		"lod_distances": [30.0, 60.0, 120.0]
+	}
+	template.production_cost = {"ree": 0, "energy": 0, "time": 0.0}  # AI spawned
+	template.abilities = ["dozer_blade", "debris_clear", "trample"]
+	template.tags = ["heavy", "harvester", "human", "armored", "resource"]
+	template.uses_heavy_physics = true
+	template._validate()
+	return template
+
+
+# =============================================================================
+# AETHER SWARM - ADDITIONAL UNITS (PRD-specified)
+# =============================================================================
+
+## Create Aether Swarm Gale Swarm template - anti-aircraft overwhelming swarm.
+func _create_aether_gale_swarm_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "aether_swarm_gale_swarm"
+	template.faction_key = "aether_swarm"
+	template.unit_type = "gale_swarm"
+	template.display_name = "Gale Swarm"
+	template.description = "Dense micro-drone cloud that overwhelms aerial targets with sheer numbers."
+	template.base_stats = {
+		"max_health": 60.0,
+		"health_regen": 2.0,
+		"max_speed": 20.0,
+		"acceleration": 100.0,
+		"turn_rate": 12.0,
+		"armor": 0.0,
+		"base_damage": 3.0,
+		"attack_speed": 4.0,
+		"attack_range": 8.0,
+		"vision_range": 35.0,
+		"swarm_count": 12,
+		"anti_air_bonus": 0.75,
+		"pursuit_speed_bonus": 0.5,
+		"scale": 0.4
+	}
+	template.production_cost = {"ree": 90, "energy": 30, "time": 4.0}
+	template.abilities = ["swarm_surge", "anti_air_focus", "envelop"]
+	template.tags = ["light", "swarm", "anti_air", "flying", "fast"]
+	template._validate()
+	return template
+
+
+## Create Aether Swarm Quillback template - ramming shell-swarm.
+func _create_aether_quillback_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "aether_swarm_quillback"
+	template.faction_key = "aether_swarm"
+	template.unit_type = "quillback"
+	template.display_name = "Quillback"
+	template.description = "Armored swarm unit that rams enemies, scattering explosive quills."
+	template.base_stats = {
+		"max_health": 80.0,
+		"health_regen": 0.5,
+		"max_speed": 14.0,
+		"acceleration": 80.0,
+		"turn_rate": 6.0,
+		"armor": 0.15,
+		"base_damage": 20.0,
+		"attack_speed": 0.8,
+		"attack_range": 3.0,
+		"vision_range": 16.0,
+		"ram_damage": 35.0,
+		"ram_speed_mult": 2.0,
+		"quill_scatter_count": 8,
+		"quill_damage": 5.0,
+		"scale": 0.8
+	}
+	template.production_cost = {"ree": 110, "energy": 35, "time": 5.0}
+	template.abilities = ["ram_attack", "quill_scatter", "swarm_synergy"]
+	template.tags = ["medium", "swarm", "melee", "ramming"]
+	template._validate()
+	return template
+
+
+## Create Aether Swarm Thornclad template - rolling spike-ball.
+func _create_aether_thornclad_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "aether_swarm_thornclad"
+	template.faction_key = "aether_swarm"
+	template.unit_type = "thornclad"
+	template.display_name = "Thornclad"
+	template.description = "Rolling spike-ball that damages everything in its path."
+	template.base_stats = {
+		"max_health": 100.0,
+		"health_regen": 0.0,
+		"max_speed": 16.0,
+		"acceleration": 90.0,
+		"turn_rate": 4.0,
+		"armor": 0.2,
+		"base_damage": 15.0,
+		"attack_speed": 1.0,
+		"attack_range": 2.0,
+		"vision_range": 14.0,
+		"roll_damage_per_second": 25.0,
+		"roll_speed_mult": 1.5,
+		"thorn_reflect_damage": 0.3,
+		"mass": 120.0,
+		"scale": 0.9
+	}
+	template.production_cost = {"ree": 130, "energy": 45, "time": 6.0}
+	template.abilities = ["roll_attack", "thorn_reflect", "momentum_strike"]
+	template.tags = ["medium", "swarm", "melee", "rolling", "aoe"]
+	template._validate()
+	return template
+
+
+## Create Aether Swarm Ghosteye template - reconnaissance cloud.
+func _create_aether_ghosteye_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "aether_swarm_ghosteye"
+	template.faction_key = "aether_swarm"
+	template.unit_type = "ghosteye"
+	template.display_name = "Ghosteye"
+	template.description = "Dispersed recon cloud that provides vision over large areas."
+	template.base_stats = {
+		"max_health": 40.0,
+		"health_regen": 1.5,
+		"max_speed": 12.0,
+		"acceleration": 70.0,
+		"turn_rate": 8.0,
+		"armor": 0.0,
+		"base_damage": 0.0,
+		"attack_speed": 0.0,
+		"attack_range": 0.0,
+		"vision_range": 50.0,
+		"reveal_stealth_range": 30.0,
+		"disperse_radius": 25.0,
+		"relay_vision": true,
+		"scale": 0.5
+	}
+	template.production_cost = {"ree": 70, "energy": 40, "time": 4.5}
+	template.abilities = ["disperse_cloud", "reveal_stealth", "relay_vision"]
+	template.tags = ["light", "swarm", "scout", "recon", "support"]
+	template._validate()
+	return template
+
+
+# =============================================================================
+# LOGIBOTS COLOSSUS - ADDITIONAL UNITS (PRD-specified)
+# =============================================================================
+
+## Create LogiBots Forge Stomper template - industrial devastation.
+func _create_logibots_forge_stomper_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "logibots_forge_stomper"
+	template.faction_key = "logibots_colossus"
+	template.unit_type = "forge_stomper"
+	template.display_name = "Forge Stomper"
+	template.description = "Massive industrial unit that crushes terrain and enemies alike."
+	template.base_stats = {
+		"max_health": 300.0,
+		"health_regen": 0.0,
+		"max_speed": 3.5,
+		"acceleration": 15.0,
+		"turn_rate": 1.5,
+		"armor": 0.4,
+		"base_damage": 45.0,
+		"attack_speed": 0.4,
+		"attack_range": 6.0,
+		"vision_range": 16.0,
+		"stomp_radius": 12.0,
+		"stomp_damage": 60.0,
+		"terrain_destruction_bonus": 2.0,
+		"building_damage_bonus": 0.5,
+		"mass": 600.0
+	}
+	template.rendering = {
+		"mesh_path": "res://assets/units/logibots/forge_stomper.tscn",
+		"material_path": "",
+		"scale": Vector3(1.6, 1.6, 1.6),
+		"use_multimesh": false,
+		"lod_distances": [25.0, 50.0, 85.0]
+	}
+	template.production_cost = {"ree": 400, "energy": 150, "time": 18.0}
+	template.abilities = ["devastation_stomp", "terrain_crush", "synchronized_strikes"]
+	template.tags = ["heavy", "siege", "melee", "industrial", "aoe"]
+	template.uses_heavy_physics = true
+	template._validate()
+	return template
+
+
+## Create LogiBots Logi-eye template - sensor pallet scout.
+func _create_logibots_logi_eye_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "logibots_logi_eye"
+	template.faction_key = "logibots_colossus"
+	template.unit_type = "logi_eye"
+	template.display_name = "Logi-eye"
+	template.description = "Sensor pallet that provides enhanced vision and target data."
+	template.base_stats = {
+		"max_health": 80.0,
+		"health_regen": 0.0,
+		"max_speed": 6.0,
+		"acceleration": 30.0,
+		"turn_rate": 4.0,
+		"armor": 0.1,
+		"base_damage": 0.0,
+		"attack_speed": 0.0,
+		"attack_range": 0.0,
+		"vision_range": 55.0,
+		"reveal_stealth_range": 35.0,
+		"target_designation_range": 40.0,
+		"target_designation_bonus": 0.3,
+		"sensor_link_range": 30.0
+	}
+	template.production_cost = {"ree": 100, "energy": 60, "time": 6.0}
+	template.abilities = ["sensor_sweep", "target_designation", "sensor_link"]
+	template.tags = ["medium", "scout", "support", "sensor", "recon"]
+	template._validate()
+	return template
+
+
+## Create LogiBots Colossus Cart template - unstoppable transport.
+func _create_logibots_colossus_cart_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "logibots_colossus_cart"
+	template.faction_key = "logibots_colossus"
+	template.unit_type = "colossus_cart"
+	template.display_name = "Colossus Cart"
+	template.description = "Massive armored transport that can carry heavy units."
+	template.base_stats = {
+		"max_health": 350.0,
+		"health_regen": 0.0,
+		"max_speed": 5.0,
+		"acceleration": 20.0,
+		"turn_rate": 2.0,
+		"armor": 0.35,
+		"base_damage": 10.0,
+		"attack_speed": 0.5,
+		"attack_range": 8.0,
+		"vision_range": 18.0,
+		"transport_capacity": 8,
+		"heavy_transport": true,
+		"ram_damage": 50.0,
+		"cargo_capacity": 300.0,
+		"mass": 500.0
+	}
+	template.rendering = {
+		"mesh_path": "res://assets/units/logibots/colossus_cart.tscn",
+		"material_path": "",
+		"scale": Vector3(1.4, 1.4, 1.4),
+		"use_multimesh": false,
+		"lod_distances": [35.0, 70.0, 120.0]
+	}
+	template.production_cost = {"ree": 280, "energy": 100, "time": 14.0}
+	template.abilities = ["heavy_transport", "ram_through", "bulk_unload"]
+	template.tags = ["heavy", "transport", "armored", "industrial"]
+	template.uses_heavy_physics = true
+	template._validate()
+	return template
+
+
+## Create LogiBots Payload Slinger template - catapult launcher.
+func _create_logibots_payload_slinger_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "logibots_payload_slinger"
+	template.faction_key = "logibots_colossus"
+	template.unit_type = "payload_slinger"
+	template.display_name = "Payload Slinger"
+	template.description = "Industrial catapult that launches explosive payloads at extreme range."
+	template.base_stats = {
+		"max_health": 160.0,
+		"health_regen": 0.0,
+		"max_speed": 4.0,
+		"acceleration": 18.0,
+		"turn_rate": 2.5,
+		"armor": 0.25,
+		"base_damage": 80.0,
+		"attack_speed": 0.15,
+		"attack_range": 45.0,
+		"vision_range": 20.0,
+		"aoe_radius": 15.0,
+		"projectile_arc": true,
+		"min_range": 15.0,
+		"payload_types": 3,
+		"reload_time": 5.0,
+		"mass": 300.0
+	}
+	template.rendering = {
+		"mesh_path": "res://assets/units/logibots/payload_slinger.tscn",
+		"material_path": "",
+		"scale": Vector3(1.3, 1.3, 1.3),
+		"use_multimesh": false,
+		"lod_distances": [40.0, 80.0, 140.0]
+	}
+	template.production_cost = {"ree": 320, "energy": 110, "time": 16.0}
+	template.abilities = ["payload_launch", "scatter_payload", "coordinated_barrage"]
+	template.tags = ["heavy", "artillery", "siege", "aoe", "industrial"]
+	template.uses_heavy_physics = true
+	template._validate()
+	return template
+
+
+# =============================================================================
+# DYNAPODS VANGUARD - ADDITIONAL UNITS (PRD-specified)
+# =============================================================================
+
+## Create Dynapods Shadowstride template - stealth quad.
+func _create_dynapods_shadowstride_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "dynapods_shadowstride"
+	template.faction_key = "dynapods_vanguard"
+	template.unit_type = "shadowstride"
+	template.display_name = "Shadowstride"
+	template.description = "Stealthy quad that can phase through terrain and ambush enemies."
+	template.base_stats = {
+		"max_health": 90.0,
+		"health_regen": 1.0,
+		"max_speed": 11.0,
+		"acceleration": 60.0,
+		"turn_rate": 6.0,
+		"armor": 0.1,
+		"base_damage": 20.0,
+		"attack_speed": 1.0,
+		"attack_range": 5.0,
+		"vision_range": 24.0,
+		"stealth_speed_mult": 0.7,
+		"ambush_damage_mult": 2.0,
+		"stealth_detection_range": 8.0,
+		"phase_through_terrain": true,
+		"mass": 110.0,
+		"friction": 0.4
+	}
+	template.rendering = {
+		"mesh_path": "res://assets/units/dynapods/shadowstride.tscn",
+		"material_path": "",
+		"scale": Vector3(0.9, 0.9, 0.9),
+		"use_multimesh": false,
+		"lod_distances": [30.0, 60.0, 100.0]
+	}
+	template.production_cost = {"ree": 200, "energy": 120, "time": 9.0}
+	template.abilities = ["stealth", "ambush_strike", "terrain_phase", "terrain_adapt"]
+	template.tags = ["medium", "stealth", "multi-legged", "ambush"]
+	template._validate()
+	return template
+
+
+## Create Dynapods Pulsepod template - EMP stomp specialist.
+func _create_dynapods_pulsepod_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "dynapods_pulsepod"
+	template.faction_key = "dynapods_vanguard"
+	template.unit_type = "pulsepod"
+	template.display_name = "Pulsepod"
+	template.description = "Heavy quad that emits devastating EMP stomps to disable enemies."
+	template.base_stats = {
+		"max_health": 160.0,
+		"health_regen": 0.5,
+		"max_speed": 7.0,
+		"acceleration": 35.0,
+		"turn_rate": 4.0,
+		"armor": 0.2,
+		"base_damage": 15.0,
+		"attack_speed": 0.8,
+		"attack_range": 6.0,
+		"vision_range": 18.0,
+		"emp_radius": 15.0,
+		"emp_duration": 4.0,
+		"emp_cooldown": 12.0,
+		"disable_chance": 0.6,
+		"stomp_damage": 25.0,
+		"mass": 200.0,
+		"friction": 0.6
+	}
+	template.rendering = {
+		"mesh_path": "res://assets/units/dynapods/pulsepod.tscn",
+		"material_path": "",
+		"scale": Vector3(1.1, 1.1, 1.1),
+		"use_multimesh": false,
+		"lod_distances": [25.0, 50.0, 85.0]
+	}
+	template.production_cost = {"ree": 250, "energy": 180, "time": 11.0}
+	template.abilities = ["emp_stomp", "disable_pulse", "terrain_adapt", "evasion_stacking"]
+	template.tags = ["heavy", "emp", "multi-legged", "aoe", "disabler"]
+	template._validate()
+	return template
+
+
+## Create Dynapods Stridetrans template - Atlas transport unit.
+func _create_dynapods_stridetrans_template() -> UnitTemplate:
+	var template := UnitTemplate.new()
+	template.template_id = "dynapods_stridetrans"
+	template.faction_key = "dynapods_vanguard"
+	template.unit_type = "stridetrans"
+	template.display_name = "Stridetrans"
+	template.description = "Massive transport quad that can carry multiple units across any terrain."
+	template.base_stats = {
+		"max_health": 250.0,
+		"health_regen": 0.0,
+		"max_speed": 8.0,
+		"acceleration": 40.0,
+		"turn_rate": 3.0,
+		"armor": 0.25,
+		"base_damage": 10.0,
+		"attack_speed": 0.5,
+		"attack_range": 8.0,
+		"vision_range": 20.0,
+		"transport_capacity": 6,
+		"terrain_speed_bonus": 0.5,
+		"leap_with_cargo": true,
+		"leap_range": 18.0,
+		"leap_cooldown": 10.0,
+		"mass": 350.0,
+		"friction": 0.5
+	}
+	template.rendering = {
+		"mesh_path": "res://assets/units/dynapods/stridetrans.tscn",
+		"material_path": "",
+		"scale": Vector3(1.3, 1.3, 1.3),
+		"use_multimesh": false,
+		"lod_distances": [35.0, 70.0, 120.0]
+	}
+	template.production_cost = {"ree": 300, "energy": 140, "time": 14.0}
+	template.abilities = ["transport", "terrain_leap", "terrain_adapt", "rapid_deploy"]
+	template.tags = ["heavy", "transport", "multi-legged", "agile"]
+	template.uses_heavy_physics = true
 	template._validate()
 	return template

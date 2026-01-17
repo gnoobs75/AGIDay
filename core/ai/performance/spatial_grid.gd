@@ -2,6 +2,7 @@ class_name AISpatialGrid
 extends RefCounted
 ## AISpatialGrid provides optimized spatial queries for nearby units and projectiles.
 ## Uses cell-based partitioning for O(1) average case lookups.
+## OPTIMIZED: Uses Vector2i keys instead of string concatenation for faster hashing.
 
 signal unit_moved(unit_id: int, old_cell: Vector2i, new_cell: Vector2i)
 
@@ -11,19 +12,19 @@ const DEFAULT_CELL_SIZE := 20.0  ## World units per cell
 ## Grid data
 var _cell_size: float = DEFAULT_CELL_SIZE
 
-## Units per cell (cell_key -> Array[int])
+## Units per cell (Vector2i -> Array[int])
 var _cells: Dictionary = {}
 
 ## Unit positions (unit_id -> Vector3)
 var _unit_positions: Dictionary = {}
 
-## Unit cells (unit_id -> cell_key)
+## Unit cells (unit_id -> Vector2i)
 var _unit_cells: Dictionary = {}
 
 ## Unit factions (unit_id -> faction_id)
 var _unit_factions: Dictionary = {}
 
-## Projectiles per cell (cell_key -> Array[int])
+## Projectiles per cell (Vector2i -> Array[int])
 var _projectile_cells: Dictionary = {}
 
 
@@ -31,19 +32,17 @@ func _init(cell_size: float = DEFAULT_CELL_SIZE) -> void:
 	_cell_size = cell_size
 
 
-## Get cell key for world position.
-func _get_cell_key(position: Vector3) -> String:
-	var cell_x := int(floor(position.x / _cell_size))
-	var cell_z := int(floor(position.z / _cell_size))
-	return str(cell_x) + "_" + str(cell_z)
-
-
-## Get cell coordinates for world position.
-func _get_cell_coords(position: Vector3) -> Vector2i:
+## Get cell key for world position (Vector2i for fast hashing).
+func _get_cell_key(position: Vector3) -> Vector2i:
 	return Vector2i(
 		int(floor(position.x / _cell_size)),
 		int(floor(position.z / _cell_size))
 	)
+
+
+## Get cell coordinates for world position (alias for _get_cell_key).
+func _get_cell_coords(position: Vector3) -> Vector2i:
+	return _get_cell_key(position)
 
 
 ## Register unit in grid.
@@ -64,12 +63,15 @@ func unregister_unit(unit_id: int) -> void:
 	if not _unit_cells.has(unit_id):
 		return
 
-	var cell_key: String = _unit_cells[unit_id]
+	var cell_key: Vector2i = _unit_cells[unit_id]
 
 	if _cells.has(cell_key):
 		var idx := _cells[cell_key].find(unit_id)
 		if idx != -1:
 			_cells[cell_key].remove_at(idx)
+		# Clean up empty cells to prevent memory growth
+		if _cells[cell_key].is_empty():
+			_cells.erase(cell_key)
 
 	_unit_positions.erase(unit_id)
 	_unit_cells.erase(unit_id)
@@ -81,7 +83,7 @@ func update_unit_position(unit_id: int, new_position: Vector3) -> void:
 	if not _unit_cells.has(unit_id):
 		return
 
-	var old_cell_key: String = _unit_cells[unit_id]
+	var old_cell_key: Vector2i = _unit_cells[unit_id]
 	var new_cell_key := _get_cell_key(new_position)
 
 	_unit_positions[unit_id] = new_position
@@ -92,6 +94,9 @@ func update_unit_position(unit_id: int, new_position: Vector3) -> void:
 			var idx := _cells[old_cell_key].find(unit_id)
 			if idx != -1:
 				_cells[old_cell_key].remove_at(idx)
+			# Clean up empty cells to prevent memory growth
+			if _cells[old_cell_key].is_empty():
+				_cells.erase(old_cell_key)
 
 		# Add to new cell
 		if not _cells.has(new_cell_key):
@@ -99,10 +104,7 @@ func update_unit_position(unit_id: int, new_position: Vector3) -> void:
 		_cells[new_cell_key].append(unit_id)
 
 		_unit_cells[unit_id] = new_cell_key
-
-		var old_coords := _get_cell_coords(_unit_positions.get(unit_id, Vector3.ZERO))
-		var new_coords := _get_cell_coords(new_position)
-		unit_moved.emit(unit_id, old_coords, new_coords)
+		unit_moved.emit(unit_id, old_cell_key, new_cell_key)
 
 
 ## Get units in range of position.
@@ -161,16 +163,15 @@ func get_allies_in_range(position: Vector3, radius: float, faction_id: String) -
 	return get_units_in_range(position, radius, faction_id)
 
 
-## Get cells in range of position.
-func _get_cells_in_range(position: Vector3, radius: float) -> Array[String]:
-	var cells: Array[String] = []
+## Get cells in range of position (returns Vector2i keys).
+func _get_cells_in_range(position: Vector3, radius: float) -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
 	var cell_radius := int(ceil(radius / _cell_size))
 	var center_coords := _get_cell_coords(position)
 
 	for dx in range(-cell_radius, cell_radius + 1):
 		for dz in range(-cell_radius, cell_radius + 1):
-			var cell_key := str(center_coords.x + dx) + "_" + str(center_coords.y + dz)
-			cells.append(cell_key)
+			cells.append(Vector2i(center_coords.x + dx, center_coords.y + dz))
 
 	return cells
 
